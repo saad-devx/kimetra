@@ -20,7 +20,7 @@ Kimetra is a cross-platform keyboard automation library for Node.js. It's perfor
 
 ## 🛌 How it works
 
-Kimetra uses Node addons built with C++ which uses the OS native APIs for every core functionality. Each addon file is pre-compiled for every major OS and their archs (i.e Linux, Mac and Windows) hence no external dependency needed and not even the compile time overhead, making it ultra fast and reliable on older or power efficient systems. But it gets better. For each arch of each OS, a separate pre-compiled addon file is created and all of the redudant files as well as separate key mapping files are removed during the installation time leaving no unuseful bit on user's device. Making its total size less than 100Kb on windows and even lesser or on unix systems. Making the Kimetra potentially a chad in marketplace 🗿.
+Kimetra uses Node addons built with C++ which uses the OS native APIs for every core functionality. Each addon file is pre-compiled for every major OS and their archs (i.e Linux, Mac and Windows) hence no external dependency needed and not even the compile time overhead, making it ultra fast and reliable on older or power efficient systems. But it gets better. For each arch of each OS, a separate pre-compiled addon file is created and all of the redudant files as well as separate key mapping files are removed during the installation time leaving no unuseful bit on user's device. Making its total size less than 100Kb on windows and even lesser on unix systems. Making the Kimetra potentially a chad in marketplace 🗿.
 
 
 ## 🚀 Quick Start
@@ -62,9 +62,7 @@ await quickActions.cmdPaste();
 
 ## 📚 API Reference
 
-### Core Classes
-
-#### KeyboardAutomation
+### Main Classes
 
 The main class for keyboard automation operations.
 
