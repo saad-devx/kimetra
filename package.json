@@ -1,0 +1,69 @@
+{
+    "name": "kimetra",
+    "version": "1.0.0",
+    "description": "A low level and light weight cross-platform keyboard automation library using native OS APIs",
+    "main": "./index.cjs",
+    "module": "./index.mjs",
+    "exports": {
+        "require": "./index.cjs",
+        "import": "./index.mjs"
+    },
+    "author": {
+        "name": "Saad",
+        "email": "saad.devx@gmail.com",
+        "url": "https://github.com/saad-devx"
+    },
+    "scripts": {
+        "test": "node scripts/test.js",
+        "example": "node examples/basic-example.js",
+        "prepack": "npm test",
+        "postinstall": "node scripts/post-install.js"
+    },
+    "keywords": [
+        "kimetra",
+        "keyboard",
+        "robot.js",
+        "nut.js",
+        "automation",
+        "native",
+        "cross-platform",
+        "windows",
+        "macos",
+        "linux",
+        "hotkeys",
+        "keystroke",
+        "input",
+        "simulation",
+        "macro",
+        "x11",
+        "win32",
+        "carbon"
+    ],
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/saad-devx/kimetra.git"
+    },
+    "bugs": {
+        "url": "https://github.com/saad-devx/kimetra/issues"
+    },
+    "homepage": "https://github.com/saad-devx/kimetra#readme",
+    "engines": {
+        "node": ">=12.0.0"
+    },
+    "os": [
+        "win32",
+        "darwin",
+        "linux"
+    ],
+    "files": [
+        "index.cjs",
+        "index.mjs",
+        "src/",
+        "scripts/post-install.js",
+        "README.md",
+        "LICENSE",
+        "CHANGELOG.md"
+    ],
+    "devDependencies": {}
+}
