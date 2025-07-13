@@ -62,6 +62,21 @@ await quickActions.cmdPaste();
 
 ## 📚 API Reference
 
+### Key Mappings
+
+Kimetra uses the object based key mappings approach inspired by Nut.js. All keye names follow 
+the same consistent structure as follows:
+
+ - All lower case
+ - Include no special characters or spaces
+ - Plain english alphabets
+
+For instance:
+
+ - `a = a`, `b = b`, `z = z`
+ - `lshift = Left Shit key`, `escape =  Esc key`, `up = Up Arrow key`, `f11 = Function 11 key`
+ - `semicolon = ;`, `hyphen = -`, `fslash = /`, `bslah = \`, `squarebracketstart = [`
+
 ### Main Classes
 
 The main class for keyboard automation operations.
@@ -205,7 +220,7 @@ const fs = require('fs');
 
 // Create and save a macro
 const loginMacro = createKimacro()
-  .typeText('johndoe_is_a_cliche')
+  .typeText('johndoe')
   .pressKey(Key.tab)
   .typeText('password123')
   .pressKey(Key.enter);
@@ -239,7 +254,7 @@ kiCore.KeyUp(Key.enter);    // Release key
 kiCore.Sleep(1000000)
 // Send a string with unicode characters
 kiCore.SendString(`👀 Fun fact: The name "Kimetra" is a combination of "Key" + "Simulation" + "Spectra".
-"Metra" also means "Womb", the low leve place where it all started.`);
+"Metra" also means "Womb", the low level place where it all started.`);
 
 // Get information about the current platform
 console.log(`Current platform: ${kimetra.os}`); // Use kimetra.os

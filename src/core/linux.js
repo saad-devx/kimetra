@@ -15,9 +15,38 @@ module.exports = {
     'f7': 73, 'f8': 74, 'f9': 75, 'f10': 76, 'f11': 95, 'f12': 96,
 
     // Special keys
-    'backspace': 22, 'tab': 23, 'enter': 36, 'lshift': 50, 'rshift': 62,
-    'lctrl': 37, 'rctrl': 105, 'lalt': 64, 'ralt': 108, 
-    'lsuper': 133, 'rsuper': 134, 'space': 65, 'escape': 9,
+    'backspace': 22, 'tab': 23, 'enter': 36,
+    'escape': 9, 'space': 65,
+    'lshift': 50, 'rshift': 62, 'lctrl': 37, 'rctrl': 105,
+    'lalt': 64, 'ralt': 108, 'lsuper': 133, 'rsuper': 134,
+
     'left': 113, 'right': 114, 'up': 111, 'down': 116,
-    'delete': 119, 'home': 110, 'end': 115, 'pageup': 112, 'pagedown': 117
-}
+    'insert': 118, 'delete': 119, 'home': 110, 'end': 115,
+    'pageup': 112, 'pagedown': 117,
+
+    // Numpad
+    'numpad0': 90, 'numpad1': 87, 'numpad2': 88, 'numpad3': 89,
+    'numpad4': 83, 'numpad5': 84, 'numpad6': 85, 'numpad7': 79,
+    'numpad8': 80, 'numpad9': 81, 'numpaddecimal': 91,
+    'numpaddivide': 106, 'numpadmultiply': 63,
+    'numpadsubtract': 82, 'numpadadd': 86, 'numpadenter': 104,
+
+    // Symbols
+    'semicolon': 49, 'hyphen': 20, 'equal': 21, 'squarebracketstart': 34, 'squarebracketend': 35,
+    'bslash': 51, 'semicolon': 47, 'quote': 48, 'comma': 59, 'dot': 60, 'fslash': 61,
+
+    // Lock keys
+    'capslock': 66, 'numlock': 77, 'scrolllock': 78,
+
+    // Media keys (XF86)
+    'volumemute': 121, 'volumedown': 122, 'volumeup': 123,
+    'mediaplaypause': 172, 'mediastop': 174,
+    'mediaprev': 173, 'medianext': 171,
+
+    // Browser keys
+    'browserhome': 180, 'browserback': 166, 'browserforward': 167,
+    'browserrefresh': 168, 'browserstop': 169, 'browsersearch': 170,
+
+    // Print/System
+    'printscreen': 107, 'scrolllock': 78, 'pause': 127
+};

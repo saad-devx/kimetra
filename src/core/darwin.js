@@ -15,9 +15,41 @@ module.exports = {
     'f7': 0x62, 'f8': 0x64, 'f9': 0x65, 'f10': 0x6D, 'f11': 0x67, 'f12': 0x6F,
 
     // Special keys
-    'backspace': 0x33, 'tab': 0x30, 'enter': 0x24, 'lshift': 0x38, 'rshift': 0x3C,
-    'lctrl': 0x3B, 'rctrl': 0x3E, 'lalt': 0x3A, 'ralt': 0x3D,
-    'lcmd': 0x37, 'rcmd': 0x36, 'cmd': 0x37, 'space': 0x31, 'escape': 0x35,
+    'backspace': 0x33, 'tab': 0x30, 'enter': 0x24,
+    'escape': 0x35, 'space': 0x31,
+    'lshift': 0x38, 'rshift': 0x3C, 'lctrl': 0x3B, 'rctrl': 0x3E,
+    'lalt': 0x3A, 'ralt': 0x3D, 'lcmd': 0x37, 'rcmd': 0x36, 'cmd': 0x37,
+
     'left': 0x7B, 'right': 0x7C, 'up': 0x7E, 'down': 0x7D,
-    'delete': 0x75, 'home': 0x73, 'end': 0x77, 'pageup': 0x74, 'pagedown': 0x79
-}
+    'insert': 0x72, 'delete': 0x75, 'home': 0x73, 'end': 0x77,
+    'pageup': 0x74, 'pagedown': 0x79,
+
+    // Numpad
+    'numpad0': 0x52, 'numpad1': 0x53, 'numpad2': 0x54, 'numpad3': 0x55,
+    'numpad4': 0x56, 'numpad5': 0x57, 'numpad6': 0x58, 'numpad7': 0x59,
+    'numpad8': 0x5B, 'numpad9': 0x5C, 'numpaddecimal': 0x41,
+    'numpaddivide': 0x4B, 'numpadmultiply': 0x43,
+    'numpadsubtract': 0x4E, 'numpadadd': 0x45, 'numpadenter': 0x4C,
+
+    // Symbols
+    'grave': 0x32, 'hyphen': 0x1B, 'equal': 0x18,
+    'squarebracketstart': 0x21, 'squarebracketend': 0x1E,
+    'bslash': 0x2A, 'semicolon': 0x29, 'quote': 0x27,
+    'comma': 0x2B, 'dot': 0x2F, 'fslash': 0x2C,
+
+    // Lock keys
+    'capslock': 0x39, 'numlock': 0x47, 'scrolllock': 0x6B,
+
+    // Media keys
+    'volumemute': 0x4A, 'volumedown': 0x49, 'volumeup': 0x48,
+    'mediaplaypause': 0x4E, 'mediastop': 0x4F,
+    'mediaprev': 0x48, 'medianext': 0x4D,
+
+    // Browser keys
+    'browserback': 0xE0, 'browserforward': 0xE1,
+    'browserrefresh': 0xE2, 'browserstop': 0xE3,
+    'browsersearch': 0xE4, 'browserhome': 0xE5,
+
+    // System
+    'printscreen': 0x69, 'pause': 0x71, 'help': 0x72, 'power': 0x7F
+};

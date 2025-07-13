@@ -29,5 +29,21 @@ module.exports = {
     'numpad0': 0x60, 'numpad1': 0x61, 'numpad2': 0x62, 'numpad3': 0x63,
     'numpad4': 0x64, 'numpad5': 0x65, 'numpad6': 0x66, 'numpad7': 0x67,
     'numpad8': 0x68, 'numpad9': 0x69, 'multiply': 0x6A, 'add': 0x6B,
-    'subtract': 0x6D, 'decimal': 0x6E, 'divide': 0x6F
+    'subtract': 0x6D, 'decimal': 0x6E, 'divide': 0x6F,
+
+    // Symbols and misc
+    'semicolon': 0xBA, 'equal': 0xBB, 'comma': 0xBC, 'hyphen': 0xBD, 'dot': 0xBE, 'fslash': 0xBF, 'backtick': 0xC0,
+    'squarebracketstart': 0xDB, 'bslash': 0xDC, 'squarebracketend': 0xDD, 'quote': 0xDE,
+
+    // Lock keys
+    'numlock': 0x90, 'scrolllock': 0x91,
+
+    // Media keys
+    'volumemute': 0xAD, 'volumedown': 0xAE, 'volumeup': 0xAF,
+    'nexttrack': 0xB0, 'prevtrack': 0xB1, 'stopmedia': 0xB2, 'playpause': 0xB3,
+
+    // Browser keys
+    'browserback': 0xA6, 'browserforward': 0xA7,
+    'browserrefresh': 0xA8, 'browserstop': 0xA9,
+    'browsersearch': 0xAA, 'browserfavorites': 0xAB, 'browserhome': 0xAC,
 }
