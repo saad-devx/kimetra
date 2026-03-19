@@ -5,6 +5,8 @@
 [![Node.js Version](https://img.shields.io/node/v/kimetra.svg)](https://nodejs.org)
 [![Platform Support](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue.svg)](#platform-support)
 
+![Banner](https://raw.githubusercontent.com/saad-devx/kimetra/refs/heads/main/src/assets/banner.jpg)
+
 Kimetra is a cross-platform keyboard automation library for Node.js. It's performance first library which focuses on max speed, precision with no external dependencies at all. It can be easily used for gaming macros as well as any automation tool and script.
 
 ## Features
