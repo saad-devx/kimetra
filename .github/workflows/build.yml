@@ -145,6 +145,6 @@ jobs:
           cp artifacts/darwin-arm64/keyboard.node src/bin/darwinarm64.node
           
       - name: Publish to NPM
-        run: npm publish
+        run: npm publish --ignore-scripts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
