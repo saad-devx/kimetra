@@ -7,23 +7,23 @@
 
 Kimetra is a cross-platform keyboard automation library for Node.js. It's performance first library which focuses on max speed, precision with no external dependencies at all. It can be easily used for gaming macros as well as any automation tool and script.
 
-## ✨ Features
+## Features
 
-- **🚀 Native Performance**: Direct OS API calls via highly optimized precompiled binaries.
-- **🔄 Cross-Platform**: Seamless support for Windows, macOS, and Linux.
-- **⌨️ Complete Control**: Manipulate single & multiple keys, combinations, typing, and macros with maximum precision.
-- **📦 Easy & Light Weight**: Simple, intuitive API with less than < 100Kb size and no external dependencies.
-- **🔧 Flexible**: Factory functions, quick actions, and a powerful chainable macro system.
-- **⚡ Ultra-Fast & Precise**: Optimized for lightning-fast execution and **microsecond-accurate** delays.
-- **🔌 Low-Level Access**: Direct access to platform-specific APIs and precise sleep functions.
-
-
-## 🛌 How it works
-
-Kimetra uses Node addons built with C++ which uses the OS native APIs for every core functionality. Each addon file is pre-compiled for every major OS and their archs (i.e Linux, Mac and Windows) hence no external dependency needed and not even the compile time overhead, making it ultra fast and reliable on older or power efficient systems. But it gets better. For each arch of each OS, a separate pre-compiled addon file is created and all of the redudant files as well as separate key mapping files are removed during the installation time leaving no unuseful bit on user's device. Making its total size less than 100Kb on windows and even lesser on unix systems. Making the Kimetra potentially a chad in marketplace 🗿.
+- **Native Performance**: Direct OS API calls via highly optimized precompiled binaries.
+- **Cross-Platform**: Seamless support for Windows, macOS, and Linux.
+- **Complete Control**: Manipulate single & multiple keys, combinations, typing, and macros with maximum precision.
+- **Easy & Light Weight**: Simple, intuitive API with less than **< 100Kb** size and no external dependencies.
+- **Flexible**: Factory functions, quick actions, and a powerful chainable macro system.
+- **Ultra-Fast & Precise**: Optimized for lightning-fast execution and **microsecond-accurate** delays.
+- **Low-Level Access**: Direct access to platform-specific APIs and precise sleep functions.
 
 
-## 🚀 Quick Start
+## How it works
+
+Kimetra uses Node addons built with C++ which uses the OS native APIs for every core functionality. Each addon file is pre-compiled for every major OS and their archs (i.e Linux, Mac and Windows) hence no external dependency needed and not even the compile time overhead, making it ultra fast and reliable on low end systems as well. But it gets better. For each arch of each OS, a separate pre-compiled addon file is created and all of the redudant and key mapping files are removed during the installation time leaving no unuseful bit on user's device. Making its total size less than **< 100Kb** on windows and even lesser on unix systems. Making the it the fastest and most lightweight keyboard automation library.
+
+
+## Quick Start
 
 ### Installation
 
@@ -60,11 +60,11 @@ await quickActions.cmdCopy();
 await quickActions.cmdPaste();
 ```
 
-## 📚 API Reference
+## API Reference
 
 ### Key Mappings
 
-Kimetra uses the object based key mappings approach inspired by Nut.js. All keye names follow 
+Kimetra uses the object based key mappings approach inspired by Nut.js. All key names follow 
 the same consistent structure as follows:
 
  - All lower case
@@ -194,7 +194,7 @@ await kimetra.cmdSave();
 await kimetra.cmdTab();
 ```
 
-## ⚡ Advanced Usage
+## Advanced Usage
 
 ### Sequence Execution
 
@@ -237,7 +237,7 @@ const loadedMacro = createKimacro().fromJSON(savedData);
 await loadedMacro.exec();
 ```
 
-### 🧮 Low-Level API Access
+### Low-Level API Access
 
 Kimetra provides direct access to its low-level, platform-specific implementations for advanced users requiring maximum control or custom functionality. This includes the highly accurate `Sleep` function as well with microseconds accuracy. Using native `Sleep` function is highly recommended instead of JS's `setTimeout` with Promise. Using pure JS among native events will add an extra latency of contexts switching overhead.
 
@@ -249,7 +249,7 @@ const kiCore = kimetra.core; // `core` contains every C++ addon function i.e. Ke
 
 // Access platform-specific methods
 kiCore.KeyDown(Key.enter);  // Press key down
-kiCore.Sleep(500)       // Wait for 500µs
+kiCore.Sleep(500)           // Wait for 500µs
 kiCore.KeyUp(Key.enter);    // Release key
 kiCore.Sleep(1000000)
 // Send a string with unicode characters

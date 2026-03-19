@@ -21,6 +21,7 @@
     },
     "keywords": [
         "kimetra",
+        "key",
         "keyboard",
         "robot.js",
         "nut.js",
@@ -59,7 +60,9 @@
     "files": [
         "index.cjs",
         "index.mjs",
-        "src/",
+        "src/bin",
+        "src/core",
+        "src/kimetra.js",
         "scripts/post-install.js",
         "README.md",
         "LICENSE",

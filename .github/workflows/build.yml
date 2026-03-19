@@ -1,0 +1,150 @@
+name: Build Node.js Addon for All Platforms
+
+on: [push, workflow_dispatch]
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [x64, ia32]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential python3-minimal
+          if [ "${{ matrix.arch }}" == "ia32" ]; then
+            sudo dpkg --add-architecture i386
+            sudo apt-get update
+            sudo apt-get install -y gcc-multilib g++-multilib libx11-dev:i386 libxtst-dev:i386
+          else
+            sudo apt-get install -y libx11-dev libxtst-dev
+          fi
+          npm install -g node-gyp
+          npm install node-addon-api
+          
+      - name: Build
+        env:
+          npm_config_arch: ${{ matrix.arch }}
+        run: |
+          node-gyp configure
+          node-gyp build
+          mkdir -p prebuilds/linux-${{ matrix.arch }}
+          cp build/Release/keyboard.node prebuilds/linux-${{ matrix.arch }}/
+          
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}
+          path: prebuilds/linux-${{ matrix.arch }}/keyboard.node
+
+  build-windows:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        arch: [x64, ia32]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          
+      - name: Install Python 3.12
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+          
+      - name: Install VS Build Tools
+        uses: ilammy/msvc-dev-cmd@v1
+          
+      - name: Install dependencies
+        run: |
+          npm install -g node-gyp
+          npm install node-addon-api
+          
+      - name: Build
+        env:
+          npm_config_arch: ${{ matrix.arch }}
+        run: |
+          node-gyp configure
+          node-gyp build
+          mkdir prebuilds\win32-${{ matrix.arch }}
+          copy build\Release\keyboard.node prebuilds\win32-${{ matrix.arch }}\
+          
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win32-${{ matrix.arch }}
+          path: prebuilds/win32-${{ matrix.arch }}/keyboard.node
+
+  build-macos:
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        arch: [x64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          
+      - name: Install dependencies
+        run: |
+          npm install -g node-gyp
+          npm install node-addon-api
+          
+      - name: Build
+        env:
+          npm_config_arch: ${{ matrix.arch }}
+        run: |
+          node-gyp configure
+          node-gyp build
+          mkdir -p prebuilds/darwin-${{ matrix.arch }}
+          cp build/Release/keyboard.node prebuilds/darwin-${{ matrix.arch }}/
+          
+      - uses: actions/upload-artifact@v4
+        with:
+          name: darwin-${{ matrix.arch }}
+          path: prebuilds/darwin-${{ matrix.arch }}/keyboard.node
+
+  publish-npm:
+    needs: [build-linux, build-windows, build-macos]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org/'
+          
+      - name: Download all built binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          
+      - name: Organize binaries into src/bin
+        run: |
+          mkdir -p src/bin
+          cp artifacts/linux-x64/keyboard.node src/bin/linuxx64.node
+          cp artifacts/linux-ia32/keyboard.node src/bin/linuxia32.node
+          cp artifacts/win32-x64/keyboard.node src/bin/win32x64.node
+          cp artifacts/win32-ia32/keyboard.node src/bin/win32ia32.node
+          cp artifacts/darwin-x64/keyboard.node src/bin/darwinx64.node
+          cp artifacts/darwin-arm64/keyboard.node src/bin/darwinarm64.node
+          
+      - name: Publish to NPM
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

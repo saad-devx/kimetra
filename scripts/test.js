@@ -14,7 +14,7 @@ const kimetra = require('../index.cjs');
 
         console.log('✅ Kimetra test passed.');
     } catch (err) {
-        console.error('❌ Kimetra test failed:', err.message);
+        console.error('❌ Kimetra test failed. Please notify the author. Error Message:', err.message);
         process.exit(1);
     }
 })();
