@@ -4,6 +4,7 @@
     "description": "A low level and light weight cross-platform keyboard automation library using native OS APIs",
     "main": "./index.cjs",
     "module": "./index.mjs",
+    "gypfile": false,
     "exports": {
         "require": "./index.cjs",
         "import": "./index.mjs"
