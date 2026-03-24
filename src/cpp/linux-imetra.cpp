@@ -4,8 +4,8 @@
 #include <string.h>
 #include <linux/uinput.h>
 #include <linux/input.h>
-#include <vector>
-#include <time.h>
+
+#include <array>
 #include <unordered_set>
 #include <unordered_map>
 
@@ -13,6 +13,67 @@ class KeyboardLinux
 {
 private:
     static int ufd;
+
+    static inline bool EnableKeyBits(int fd)
+    {
+        static const std::array<int, 103> keys = {
+            // Letters
+            KEY_A, KEY_B, KEY_C, KEY_D, KEY_E, KEY_F, KEY_G, KEY_H, KEY_I, KEY_J,
+            KEY_K, KEY_L, KEY_M, KEY_N, KEY_O, KEY_P, KEY_Q, KEY_R, KEY_S, KEY_T,
+            KEY_U, KEY_V, KEY_W, KEY_X, KEY_Y, KEY_Z,
+
+            // Numbers
+            KEY_0, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9,
+
+            // Function keys
+            KEY_F1, KEY_F2, KEY_F3, KEY_F4, KEY_F5, KEY_F6,
+            KEY_F7, KEY_F8, KEY_F9, KEY_F10, KEY_F11, KEY_F12,
+
+            // Special keys
+            KEY_BACKSPACE, KEY_TAB, KEY_ENTER,
+            KEY_ESC, KEY_SPACE, KEY_GRAVE,
+            KEY_LEFTSHIFT, KEY_RIGHTSHIFT, KEY_LEFTCTRL, KEY_RIGHTCTRL,
+            KEY_LEFTALT, KEY_RIGHTALT, KEY_LEFTMETA, KEY_RIGHTMETA,
+
+            // Arrow/navigation
+            KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN,
+            KEY_INSERT, KEY_DELETE, KEY_HOME, KEY_END,
+            KEY_PAGEUP, KEY_PAGEDOWN,
+
+            // Numpad
+            KEY_KP0, KEY_KP1, KEY_KP2, KEY_KP3, KEY_KP4,
+            KEY_KP5, KEY_KP6, KEY_KP7, KEY_KP8, KEY_KP9,
+            KEY_KPDOT, KEY_KPSLASH, KEY_KPASTERISK,
+            KEY_KPMINUS, KEY_KPPLUS, KEY_KPENTER,
+
+            // Symbols
+            KEY_SEMICOLON, KEY_MINUS, KEY_EQUAL,
+            KEY_LEFTBRACE, KEY_RIGHTBRACE, KEY_BACKSLASH,
+            KEY_APOSTROPHE, KEY_COMMA, KEY_DOT, KEY_SLASH,
+
+            // Lock keys
+            KEY_CAPSLOCK, KEY_NUMLOCK, KEY_SCROLLLOCK,
+
+            // Media keys
+            KEY_MUTE, KEY_VOLUMEDOWN, KEY_VOLUMEUP,
+            KEY_PLAYPAUSE, KEY_STOPCD, KEY_PREVIOUSSONG, KEY_NEXTSONG,
+
+            // Browser keys
+            KEY_HOMEPAGE, KEY_BACK, KEY_FORWARD,
+            KEY_REFRESH, KEY_STOP, KEY_SEARCH,
+
+            // Print/System
+            KEY_SYSRQ, KEY_PAUSE
+        };
+
+        for (int key : keys)
+        {
+            if (ioctl(fd, UI_SET_KEYBIT, key) < 0)
+                return false;
+        }
+
+        return true;
+    }
 
     static inline int GetDevice()
     {
@@ -23,12 +84,20 @@ private:
         if (ufd < 0)
             return -1;
 
-        ioctl(ufd, UI_SET_EVBIT, EV_KEY);
-        ioctl(ufd, UI_SET_EVBIT, EV_SYN);
+        if (ioctl(ufd, UI_SET_EVBIT, EV_KEY) < 0 ||
+            ioctl(ufd, UI_SET_EVBIT, EV_SYN) < 0)
+        {
+            close(ufd);
+            ufd = -1;
+            return -1;
+        }
 
-        for (int i = KEY_ESC; i <= KEY_KPDOT; i++)
-            ioctl(ufd, UI_SET_KEYBIT, i);
-        ioctl(ufd, UI_SET_KEYBIT, KEY_LEFTSHIFT);
+        if (!EnableKeyBits(ufd))
+        {
+            close(ufd);
+            ufd = -1;
+            return -1;
+        }
 
         struct uinput_setup usetup = {};
         usetup.id.bustype = BUS_USB;
@@ -62,6 +131,7 @@ private:
         int fd = GetDevice();
         if (fd < 0)
             return false;
+
         return Emit(fd, EV_KEY, keycode, isDown ? 1 : 0) &&
                Emit(fd, EV_SYN, SYN_REPORT, 0);
     }
@@ -73,7 +143,8 @@ private:
 
         static const std::unordered_set<char16_t> shiftChars = {
             '!', '@', '#', '$', '%', '^', '&', '*', '(', ')',
-            '_', '+', '{', '}', '|', ':', '"', '<', '>', '?', '~'};
+            '_', '+', '{', '}', '|', ':', '"', '<', '>', '?', '~'
+        };
 
         return shiftChars.find(ch) != shiftChars.end();
     }
@@ -84,16 +155,18 @@ private:
             {'\n', KEY_ENTER},
             {'\t', KEY_TAB},
             {'\b', KEY_BACKSPACE},
-            {' ',  KEY_SPACE}};
+            {' ',  KEY_SPACE}
+        };
 
         static const std::unordered_map<char16_t, int> shiftKeyAlts = {
             {'!', KEY_1},         {'@', KEY_2},         {'#', KEY_3},
             {'$', KEY_4},         {'%', KEY_5},         {'^', KEY_6},
             {'&', KEY_7},         {'*', KEY_8},         {'(', KEY_9},
-            {')', KEY_0},         {'_', KEY_MINUS},      {'+', KEY_EQUAL},
-            {'{', KEY_LEFTBRACE}, {'}', KEY_RIGHTBRACE}, {'|', KEY_BACKSLASH},
-            {':', KEY_SEMICOLON}, {'"', KEY_APOSTROPHE}, {'<', KEY_COMMA},
-            {'>', KEY_DOT},       {'?', KEY_SLASH},      {'~', KEY_GRAVE}};
+            {')', KEY_0},         {'_', KEY_MINUS},     {'+', KEY_EQUAL},
+            {'{', KEY_LEFTBRACE}, {'}', KEY_RIGHTBRACE},{'|', KEY_BACKSLASH},
+            {':', KEY_SEMICOLON}, {'"', KEY_APOSTROPHE},{'<', KEY_COMMA},
+            {'>', KEY_DOT},       {'?', KEY_SLASH},     {'~', KEY_GRAVE}
+        };
 
         static const std::unordered_map<char16_t, int> plainKeys = {
             {'a', KEY_A}, {'b', KEY_B}, {'c', KEY_C}, {'d', KEY_D}, {'e', KEY_E},
@@ -102,12 +175,15 @@ private:
             {'p', KEY_P}, {'q', KEY_Q}, {'r', KEY_R}, {'s', KEY_S}, {'t', KEY_T},
             {'u', KEY_U}, {'v', KEY_V}, {'w', KEY_W}, {'x', KEY_X}, {'y', KEY_Y},
             {'z', KEY_Z},
+
             {'0', KEY_0}, {'1', KEY_1}, {'2', KEY_2}, {'3', KEY_3}, {'4', KEY_4},
             {'5', KEY_5}, {'6', KEY_6}, {'7', KEY_7}, {'8', KEY_8}, {'9', KEY_9},
+
             {'-', KEY_MINUS},      {'=', KEY_EQUAL},      {'[', KEY_LEFTBRACE},
             {']', KEY_RIGHTBRACE}, {'\\', KEY_BACKSLASH}, {';', KEY_SEMICOLON},
-            {'\'', KEY_APOSTROPHE},{',', KEY_COMMA},       {'.', KEY_DOT},
-            {'/', KEY_SLASH},      {'`', KEY_GRAVE}};
+            {'\'', KEY_APOSTROPHE},{',', KEY_COMMA},      {'.', KEY_DOT},
+            {'/', KEY_SLASH},      {'`', KEY_GRAVE}
+        };
 
         auto it = controlKeys.find(ch);
         if (it != controlKeys.end())
@@ -136,6 +212,7 @@ public:
         Napi::Env env = info.Env();
         if (info.Length() == 0 || !info[0].IsNumber())
             return Napi::Boolean::New(env, false);
+
         int keycode = info[0].As<Napi::Number>().Int32Value();
         return Napi::Boolean::New(env, SendKey(keycode, true));
     }
@@ -145,6 +222,7 @@ public:
         Napi::Env env = info.Env();
         if (info.Length() == 0 || !info[0].IsNumber())
             return Napi::Boolean::New(env, false);
+
         int keycode = info[0].As<Napi::Number>().Int32Value();
         return Napi::Boolean::New(env, SendKey(keycode, false));
     }
@@ -181,11 +259,19 @@ public:
             bool needShift = RequiresShift(ch);
 
             if (needShift)
-                if (!Emit(fd, EV_KEY, KEY_LEFTSHIFT, 1) || !Emit(fd, EV_SYN, SYN_REPORT, 0))
-                    { success = false; break; }
+            {
+                if (!Emit(fd, EV_KEY, KEY_LEFTSHIFT, 1) ||
+                    !Emit(fd, EV_SYN, SYN_REPORT, 0))
+                {
+                    success = false;
+                    break;
+                }
+            }
 
-            if (!Emit(fd, EV_KEY, keycode, 1) || !Emit(fd, EV_SYN, SYN_REPORT, 0) ||
-                !Emit(fd, EV_KEY, keycode, 0) || !Emit(fd, EV_SYN, SYN_REPORT, 0))
+            if (!Emit(fd, EV_KEY, keycode, 1) ||
+                !Emit(fd, EV_SYN, SYN_REPORT, 0) ||
+                !Emit(fd, EV_KEY, keycode, 0) ||
+                !Emit(fd, EV_SYN, SYN_REPORT, 0))
             {
                 if (needShift)
                 {
@@ -197,8 +283,14 @@ public:
             }
 
             if (needShift)
-                if (!Emit(fd, EV_KEY, KEY_LEFTSHIFT, 0) || !Emit(fd, EV_SYN, SYN_REPORT, 0))
-                    { success = false; break; }
+            {
+                if (!Emit(fd, EV_KEY, KEY_LEFTSHIFT, 0) ||
+                    !Emit(fd, EV_SYN, SYN_REPORT, 0))
+                {
+                    success = false;
+                    break;
+                }
+            }
         }
 
         return Napi::Boolean::New(env, success);
@@ -215,14 +307,17 @@ public:
             return env.Undefined();
 
         constexpr int BUSY_WAIT_THRESHOLD = 100000;
+
         if (micros <= BUSY_WAIT_THRESHOLD)
         {
             struct timespec start, now;
             clock_gettime(CLOCK_MONOTONIC, &start);
             long long target = start.tv_sec * 1'000'000LL + start.tv_nsec / 1000 + micros;
+
             do {
                 clock_gettime(CLOCK_MONOTONIC, &now);
-                if (now.tv_sec * 1'000'000LL + now.tv_nsec / 1000 >= target) break;
+                if (now.tv_sec * 1'000'000LL + now.tv_nsec / 1000 >= target)
+                    break;
             } while (true);
         }
         else
@@ -230,15 +325,18 @@ public:
             int sleepMicros = micros - BUSY_WAIT_THRESHOLD;
             struct timespec req = {
                 .tv_sec  = sleepMicros / 1'000'000,
-                .tv_nsec = (sleepMicros % 1'000'000) * 1000};
+                .tv_nsec = (sleepMicros % 1'000'000) * 1000
+            };
             nanosleep(&req, nullptr);
 
             struct timespec start, now;
             clock_gettime(CLOCK_MONOTONIC, &start);
             long long target = start.tv_sec * 1'000'000LL + start.tv_nsec / 1000 + BUSY_WAIT_THRESHOLD;
+
             do {
                 clock_gettime(CLOCK_MONOTONIC, &now);
-                if (now.tv_sec * 1'000'000LL + now.tv_nsec / 1000 >= target) break;
+                if (now.tv_sec * 1'000'000LL + now.tv_nsec / 1000 >= target)
+                    break;
             } while (true);
         }
 

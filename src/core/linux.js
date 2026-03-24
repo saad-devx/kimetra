@@ -1,52 +1,52 @@
-// linux
+// linux uinput mappings
 module.exports = {
     // Letters
-    'a': 38, 'b': 56, 'c': 54, 'd': 40, 'e': 26, 'f': 41, 'g': 42,
-    'h': 43, 'i': 31, 'j': 44, 'k': 45, 'l': 46, 'm': 58, 'n': 57,
-    'o': 32, 'p': 33, 'q': 24, 'r': 27, 's': 39, 't': 28, 'u': 30,
-    'v': 55, 'w': 25, 'x': 53, 'y': 29, 'z': 52,
+    'a': 30, 'b': 48, 'c': 46, 'd': 32, 'e': 18, 'f': 33, 'g': 34,
+    'h': 35, 'i': 23, 'j': 36, 'k': 37, 'l': 38, 'm': 50, 'n': 49,
+    'o': 24, 'p': 25, 'q': 16, 'r': 19, 's': 31, 't': 20, 'u': 22,
+    'v': 47, 'w': 17, 'x': 45, 'y': 21, 'z': 44,
 
     // Numbers
-    '0': 19, '1': 10, '2': 11, '3': 12, '4': 13,
-    '5': 14, '6': 15, '7': 16, '8': 17, '9': 18,
+    '0': 11, '1': 2, '2': 3, '3': 4, '4': 5,
+    '5': 6, '6': 7, '7': 8, '8': 9, '9': 10,
 
     // Function keys
-    'f1': 67, 'f2': 68, 'f3': 69, 'f4': 70, 'f5': 71, 'f6': 72,
-    'f7': 73, 'f8': 74, 'f9': 75, 'f10': 76, 'f11': 95, 'f12': 96,
+    'f1': 59, 'f2': 60, 'f3': 61, 'f4': 62, 'f5': 63, 'f6': 64,
+    'f7': 65, 'f8': 66, 'f9': 67, 'f10': 68, 'f11': 87, 'f12': 88,
 
     // Special keys
-    'backspace': 22, 'tab': 23, 'enter': 36,
-    'escape': 9, 'space': 65,
-    'lshift': 50, 'rshift': 62, 'lctrl': 37, 'rctrl': 105,
-    'lalt': 64, 'ralt': 108, 'lsuper': 133, 'rsuper': 134,
+    'backspace': 14, 'tab': 15, 'enter': 28,
+    'escape': 1, 'space': 57, 'grave': 41,
+    'lshift': 42, 'rshift': 54, 'lctrl': 29, 'rctrl': 97,
+    'lalt': 56, 'ralt': 100, 'lsuper': 125, 'rsuper': 126,
 
-    'left': 113, 'right': 114, 'up': 111, 'down': 116,
-    'insert': 118, 'delete': 119, 'home': 110, 'end': 115,
-    'pageup': 112, 'pagedown': 117,
+    'left': 105, 'right': 106, 'up': 103, 'down': 108,
+    'insert': 110, 'delete': 111, 'home': 102, 'end': 107,
+    'pageup': 104, 'pagedown': 109,
 
     // Numpad
-    'numpad0': 90, 'numpad1': 87, 'numpad2': 88, 'numpad3': 89,
-    'numpad4': 83, 'numpad5': 84, 'numpad6': 85, 'numpad7': 79,
-    'numpad8': 80, 'numpad9': 81, 'numpaddecimal': 91,
-    'numpaddivide': 106, 'numpadmultiply': 63,
-    'numpadsubtract': 82, 'numpadadd': 86, 'numpadenter': 104,
+    'numpad0': 82, 'numpad1': 79, 'numpad2': 80, 'numpad3': 81,
+    'numpad4': 75, 'numpad5': 76, 'numpad6': 77, 'numpad7': 71,
+    'numpad8': 72, 'numpad9': 73, 'numpaddecimal': 83,
+    'numpaddivide': 98, 'numpadmultiply': 55,
+    'numpadsubtract': 74, 'numpadadd': 78, 'numpadenter': 96,
 
     // Symbols
-    'semicolon': 49, 'hyphen': 20, 'equal': 21, 'squarebracketstart': 34, 'squarebracketend': 35,
-    'bslash': 51, 'semicolon': 47, 'quote': 48, 'comma': 59, 'dot': 60, 'fslash': 61,
+    'semicolon': 39, 'hyphen': 12, 'equal': 13, 'squarebracketstart': 26, 'squarebracketend': 27,
+    'bslash': 43, 'quote': 40, 'comma': 51, 'dot': 52, 'fslash': 53,
 
     // Lock keys
-    'capslock': 66, 'numlock': 77, 'scrolllock': 78,
+    'capslock': 58, 'numlock': 69, 'scrolllock': 70,
 
-    // Media keys (XF86)
-    'volumemute': 121, 'volumedown': 122, 'volumeup': 123,
-    'mediaplaypause': 172, 'mediastop': 174,
-    'mediaprev': 173, 'medianext': 171,
+    // Media keys
+    'volumemute': 113, 'volumedown': 114, 'volumeup': 115,
+    'mediaplaypause': 164, 'mediastop': 166,
+    'mediaprev': 165, 'medianext': 163,
 
     // Browser keys
-    'browserhome': 180, 'browserback': 166, 'browserforward': 167,
-    'browserrefresh': 168, 'browserstop': 169, 'browsersearch': 170,
+    'browserhome': 172, 'browserback': 158, 'browserforward': 159,
+    'browserrefresh': 173, 'browserstop': 128, 'browsersearch': 217,
 
     // Print/System
-    'printscreen': 107, 'scrolllock': 78, 'pause': 127
+    'printscreen': 99, 'pause': 119
 };

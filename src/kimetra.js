@@ -4,6 +4,15 @@ const KeyMap = require('./core/win32.js')
 const Binary = require('./bin/win32x64.node')
 
 class Kimetra {
+    /**
+     * @typedef {Object} KimetraOptions
+     * @property {number} [delay=0] - Initial delay before starting actions (μs)
+     * @property {number} [interval=700] - Time between repeated actions (μs)
+     * @property {number} [duration=700] - How long a single key press is held (μs)
+     * @property {number} [hotkeyDelay=1500] - Delay specifically for multi-key combinations (μs)
+     */
+
+    /** @param {KimetraOptions} options */
     constructor(options = {}) {
         if (!Binary) {
             throw new Error(`Kimetra is not supported on this platform: ${OS}`);
@@ -81,8 +90,8 @@ class Kimetra {
     /**
      * Press multiple keys in sequence
      * @param {string[]} keys - Array of keys to press
-     * @param {number} interval - Interval between key presses (ms)
-     * @param {number} delay - Initial delay (ms)
+     * @param {number} interval - Interval between key presses (μs)
+     * @param {number} delay - Initial delay (μs)
      */
     async pressKeys(keys, interval = this.defaultInterval, delay = this.defaultDelay) {
         if (delay > 0) {
@@ -101,8 +110,8 @@ class Kimetra {
     /**
      * Press key combination (hotkey)
      * @param {string[]} keys - Array of keys to press simultaneously
-     * @param {number} duration - Duration to hold keys (ms)
-     * @param {number} delay - Delay before action (ms)
+     * @param {number} duration - Duration to hold keys (μs)
+     * @param {number} delay - Delay before action (μs)
      */
     async pressHotkey(keys, duration = this.defaultHotkeyDelay, delay = this.defaultDelay) {
         if (delay > 0) {
@@ -127,8 +136,8 @@ class Kimetra {
     /**
      * Hold a key for a specific duration
      * @param {string} key - Key to hold
-     * @param {number} duration - Duration to hold (ms)
-     * @param {number} delay - Delay before action (ms)
+     * @param {number} duration - Duration to hold (μs)
+     * @param {number} delay - Delay before action (μs)
      */
     async holdKey(keyCode, duration = 1000, delay = this.defaultDelay) {
         if (keyCode === undefined) {
@@ -147,8 +156,8 @@ class Kimetra {
      * Repeat a key press multiple times
      * @param {string} key - Key to repeat
      * @param {number} times - Number of repetitions
-     * @param {number} interval - Interval between repetitions (ms)
-     * @param {number} delay - Initial delay (ms)
+     * @param {number} interval - Interval between repetitions (μs)
+     * @param {number} delay - Initial delay (μs)
      */
     async repeatKey(keyCode, times, interval = 50, delay = this.defaultDelay) {
         if (keyCode === undefined) {
@@ -368,6 +377,15 @@ const quickActions = {
 };
 
 // Factory functions
+
+/**
+ * Creates a new Kimetra instance
+ * @param {Object} options
+ * @param {number} [delay=0] - Initial delay before starting actions (μs)
+ * @param {number} [interval=700] - Time between repeated actions (μs)
+ * @param {number} [duration=700] - How long a single key press is held (μs)
+ * @param {number} [hotkeyDelay=1500] - Delay specifically for multi-key combinations (μs)
+ */
 function createKimetra(options = {
     delay: 0,
     interval: 700,
