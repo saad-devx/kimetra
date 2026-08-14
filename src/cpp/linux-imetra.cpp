@@ -1,132 +1,92 @@
 #include <napi.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <string.h>
+#include <time.h>
+#include <sys/ioctl.h>
 #include <linux/uinput.h>
 #include <linux/input.h>
 
-#include <array>
-#include <unordered_set>
+#include <string>
 #include <unordered_map>
 
-class KeyboardLinux
+namespace
 {
-private:
-    static int ufd;
-
-    static inline bool EnableKeyBits(int fd)
+    enum Op
     {
-        static const std::vector<int> keys = {
-            // Letters
-            KEY_A, KEY_B, KEY_C, KEY_D, KEY_E, KEY_F, KEY_G, KEY_H, KEY_I, KEY_J,
-            KEY_K, KEY_L, KEY_M, KEY_N, KEY_O, KEY_P, KEY_Q, KEY_R, KEY_S, KEY_T,
-            KEY_U, KEY_V, KEY_W, KEY_X, KEY_Y, KEY_Z,
+        OP_DOWN = 0,
+        OP_UP = 1,
+        OP_SLEEP = 2,
+        OP_TEXT = 3
+    };
 
-            // Numbers
-            KEY_0, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9,
+    // Spin margin: the coarse sleep stops this far short of the deadline and the
+    // remainder is busy-waited. Keeps the wait accurate without burning a core.
+    constexpr int SPIN_MARGIN_US = 1200;
 
-            // Function keys
-            KEY_F1, KEY_F2, KEY_F3, KEY_F4, KEY_F5, KEY_F6,
-            KEY_F7, KEY_F8, KEY_F9, KEY_F10, KEY_F11, KEY_F12,
+    // Time for the compositor to enumerate the new virtual device. Paid once per
+    // process; too short and the first keystroke is dropped.
+    constexpr int DEVICE_SETTLE_US = 250000;
 
-            // Special keys
-            KEY_BACKSPACE, KEY_TAB, KEY_ENTER,
-            KEY_ESC, KEY_SPACE, KEY_GRAVE,
-            KEY_LEFTSHIFT, KEY_RIGHTSHIFT, KEY_LEFTCTRL, KEY_RIGHTCTRL,
-            KEY_LEFTALT, KEY_RIGHTALT, KEY_LEFTMETA, KEY_RIGHTMETA,
+    const char *PERMISSION_HINT =
+        "Kimetra cannot open /dev/uinput. Grant access with a udev rule:\n"
+        "  echo 'KERNEL==\"uinput\", GROUP=\"input\", MODE=\"0660\"' | "
+        "sudo tee /etc/udev/rules.d/99-kimetra.rules\n"
+        "  sudo usermod -aG input $USER\n"
+        "Then reboot, or run the process as root.";
 
-            // Arrow/navigation
-            KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN,
-            KEY_INSERT, KEY_DELETE, KEY_HOME, KEY_END,
-            KEY_PAGEUP, KEY_PAGEDOWN,
+    int g_fd = -1;
 
-            // Numpad
-            KEY_KP0, KEY_KP1, KEY_KP2, KEY_KP3, KEY_KP4,
-            KEY_KP5, KEY_KP6, KEY_KP7, KEY_KP8, KEY_KP9,
-            KEY_KPDOT, KEY_KPSLASH, KEY_KPASTERISK,
-            KEY_KPMINUS, KEY_KPPLUS, KEY_KPENTER,
+    int GetDevice() noexcept
+    {
+        if (g_fd >= 0)
+            return g_fd;
 
-            // Symbols
-            KEY_SEMICOLON, KEY_MINUS, KEY_EQUAL,
-            KEY_LEFTBRACE, KEY_RIGHTBRACE, KEY_BACKSLASH,
-            KEY_APOSTROPHE, KEY_COMMA, KEY_DOT, KEY_SLASH,
+        g_fd = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
+        if (g_fd < 0)
+            return -1;
 
-            // Lock keys
-            KEY_CAPSLOCK, KEY_NUMLOCK, KEY_SCROLLLOCK,
-
-            // Media keys
-            KEY_MUTE, KEY_VOLUMEDOWN, KEY_VOLUMEUP,
-            KEY_PLAYPAUSE, KEY_STOPCD, KEY_PREVIOUSSONG, KEY_NEXTSONG,
-
-            // Browser keys
-            KEY_HOMEPAGE, KEY_BACK, KEY_FORWARD,
-            KEY_REFRESH, KEY_STOP, KEY_SEARCH,
-
-            // Print/System
-            KEY_SYSRQ, KEY_PAUSE
-        };
-
-        for (int key : keys)
+        if (ioctl(g_fd, UI_SET_EVBIT, EV_KEY) < 0 || ioctl(g_fd, UI_SET_EVBIT, EV_SYN) < 0)
         {
-            if (ioctl(fd, UI_SET_KEYBIT, key) < 0)
-                return false;
+            close(g_fd);
+            g_fd = -1;
+            return -1;
         }
 
-        return true;
+        // Declare the full standard key range so no mapped key is silently filtered.
+        for (int key = 1; key <= 255; key++)
+        {
+            ioctl(g_fd, UI_SET_KEYBIT, key);
+        }
+
+        struct uinput_setup setup = {};
+        setup.id.bustype = BUS_USB;
+        setup.id.vendor = 0x1234;
+        setup.id.product = 0x5678;
+        strncpy(setup.name, "kimetra-virtual-keyboard", UINPUT_MAX_NAME_SIZE - 1);
+
+        if (ioctl(g_fd, UI_DEV_SETUP, &setup) < 0 || ioctl(g_fd, UI_DEV_CREATE) < 0)
+        {
+            close(g_fd);
+            g_fd = -1;
+            return -1;
+        }
+
+        usleep(DEVICE_SETTLE_US);
+        return g_fd;
     }
 
-    static inline int GetDevice()
-    {
-        if (ufd >= 0)
-            return ufd;
-
-        ufd = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
-        if (ufd < 0)
-            return -1;
-
-        if (ioctl(ufd, UI_SET_EVBIT, EV_KEY) < 0 ||
-            ioctl(ufd, UI_SET_EVBIT, EV_SYN) < 0)
-        {
-            close(ufd);
-            ufd = -1;
-            return -1;
-        }
-
-        if (!EnableKeyBits(ufd))
-        {
-            close(ufd);
-            ufd = -1;
-            return -1;
-        }
-
-        struct uinput_setup usetup = {};
-        usetup.id.bustype = BUS_USB;
-        usetup.id.vendor  = 0x1234;
-        usetup.id.product = 0x5678;
-        strncpy(usetup.name, "kimetra-virtual-keyboard", UINPUT_MAX_NAME_SIZE);
-
-        if (ioctl(ufd, UI_DEV_SETUP, &usetup) < 0 ||
-            ioctl(ufd, UI_DEV_CREATE) < 0)
-        {
-            close(ufd);
-            ufd = -1;
-            return -1;
-        }
-
-        usleep(50000);
-        return ufd;
-    }
-
-    static inline bool Emit(int fd, int type, int code, int value)
+    bool Emit(int fd, int type, int code, int value) noexcept
     {
         struct input_event ev = {};
-        ev.type  = type;
-        ev.code  = code;
+        ev.type = static_cast<__u16>(type);
+        ev.code = static_cast<__u16>(code);
         ev.value = value;
         return write(fd, &ev, sizeof(ev)) == sizeof(ev);
     }
 
-    static inline bool SendKey(int keycode, bool isDown)
+    bool SendKey(int keycode, bool isDown) noexcept
     {
         int fd = GetDevice();
         if (fd < 0)
@@ -136,234 +96,300 @@ private:
                Emit(fd, EV_SYN, SYN_REPORT, 0);
     }
 
-    static inline bool RequiresShift(char16_t ch)
+    void PreciseSleep(int micros) noexcept
     {
-        if (ch >= 'A' && ch <= 'Z')
-            return true;
+        if (micros < 1)
+            return;
 
-        static const std::unordered_set<char16_t> shiftChars = {
-            '!', '@', '#', '$', '%', '^', '&', '*', '(', ')',
-            '_', '+', '{', '}', '|', ':', '"', '<', '>', '?', '~'
-        };
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
 
-        return shiftChars.find(ch) != shiftChars.end();
-    }
+        long long deadline = static_cast<long long>(ts.tv_sec) * 1000000000LL +
+                             ts.tv_nsec + static_cast<long long>(micros) * 1000LL;
 
-    static inline int GetKeyCode(char16_t ch)
-    {
-        static const std::unordered_map<char16_t, int> controlKeys = {
-            {'\n', KEY_ENTER},
-            {'\t', KEY_TAB},
-            {'\b', KEY_BACKSPACE},
-            {' ',  KEY_SPACE}
-        };
-
-        static const std::unordered_map<char16_t, int> shiftKeyAlts = {
-            {'!', KEY_1},         {'@', KEY_2},         {'#', KEY_3},
-            {'$', KEY_4},         {'%', KEY_5},         {'^', KEY_6},
-            {'&', KEY_7},         {'*', KEY_8},         {'(', KEY_9},
-            {')', KEY_0},         {'_', KEY_MINUS},     {'+', KEY_EQUAL},
-            {'{', KEY_LEFTBRACE}, {'}', KEY_RIGHTBRACE},{'|', KEY_BACKSLASH},
-            {':', KEY_SEMICOLON}, {'"', KEY_APOSTROPHE},{'<', KEY_COMMA},
-            {'>', KEY_DOT},       {'?', KEY_SLASH},     {'~', KEY_GRAVE}
-        };
-
-        static const std::unordered_map<char16_t, int> plainKeys = {
-            {'a', KEY_A}, {'b', KEY_B}, {'c', KEY_C}, {'d', KEY_D}, {'e', KEY_E},
-            {'f', KEY_F}, {'g', KEY_G}, {'h', KEY_H}, {'i', KEY_I}, {'j', KEY_J},
-            {'k', KEY_K}, {'l', KEY_L}, {'m', KEY_M}, {'n', KEY_N}, {'o', KEY_O},
-            {'p', KEY_P}, {'q', KEY_Q}, {'r', KEY_R}, {'s', KEY_S}, {'t', KEY_T},
-            {'u', KEY_U}, {'v', KEY_V}, {'w', KEY_W}, {'x', KEY_X}, {'y', KEY_Y},
-            {'z', KEY_Z},
-
-            {'0', KEY_0}, {'1', KEY_1}, {'2', KEY_2}, {'3', KEY_3}, {'4', KEY_4},
-            {'5', KEY_5}, {'6', KEY_6}, {'7', KEY_7}, {'8', KEY_8}, {'9', KEY_9},
-
-            {'-', KEY_MINUS},      {'=', KEY_EQUAL},      {'[', KEY_LEFTBRACE},
-            {']', KEY_RIGHTBRACE}, {'\\', KEY_BACKSLASH}, {';', KEY_SEMICOLON},
-            {'\'', KEY_APOSTROPHE},{',', KEY_COMMA},      {'.', KEY_DOT},
-            {'/', KEY_SLASH},      {'`', KEY_GRAVE}
-        };
-
-        auto it = controlKeys.find(ch);
-        if (it != controlKeys.end())
-            return it->second;
-
-        if (ch >= 'A' && ch <= 'Z')
+        if (micros > SPIN_MARGIN_US)
         {
-            auto lit = plainKeys.find((char16_t)(ch - 'A' + 'a'));
-            return lit != plainKeys.end() ? lit->second : -1;
+            long long coarse = deadline - static_cast<long long>(SPIN_MARGIN_US) * 1000LL;
+            struct timespec until;
+            until.tv_sec = static_cast<time_t>(coarse / 1000000000LL);
+            until.tv_nsec = static_cast<long>(coarse % 1000000000LL);
+            clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &until, nullptr);
         }
 
-        it = shiftKeyAlts.find(ch);
-        if (it != shiftKeyAlts.end())
-            return it->second;
+        do
+        {
+            clock_gettime(CLOCK_MONOTONIC, &ts);
+        } while (static_cast<long long>(ts.tv_sec) * 1000000000LL + ts.tv_nsec < deadline);
+    }
 
-        it = plainKeys.find(ch);
-        if (it != plainKeys.end())
-            return it->second;
+    // uinput emits scan codes, so typed text is limited to what a US QWERTY layout
+    // can produce. Anything else is reported rather than silently dropped.
+    const std::unordered_map<char16_t, int> &PlainKeys()
+    {
+        static const std::unordered_map<char16_t, int> map = {
+            {u'a', KEY_A}, {u'b', KEY_B}, {u'c', KEY_C}, {u'd', KEY_D}, {u'e', KEY_E},
+            {u'f', KEY_F}, {u'g', KEY_G}, {u'h', KEY_H}, {u'i', KEY_I}, {u'j', KEY_J},
+            {u'k', KEY_K}, {u'l', KEY_L}, {u'm', KEY_M}, {u'n', KEY_N}, {u'o', KEY_O},
+            {u'p', KEY_P}, {u'q', KEY_Q}, {u'r', KEY_R}, {u's', KEY_S}, {u't', KEY_T},
+            {u'u', KEY_U}, {u'v', KEY_V}, {u'w', KEY_W}, {u'x', KEY_X}, {u'y', KEY_Y},
+            {u'z', KEY_Z},
+            {u'0', KEY_0}, {u'1', KEY_1}, {u'2', KEY_2}, {u'3', KEY_3}, {u'4', KEY_4},
+            {u'5', KEY_5}, {u'6', KEY_6}, {u'7', KEY_7}, {u'8', KEY_8}, {u'9', KEY_9},
+            {u'-', KEY_MINUS}, {u'=', KEY_EQUAL}, {u'[', KEY_LEFTBRACE},
+            {u']', KEY_RIGHTBRACE}, {u'\\', KEY_BACKSLASH}, {u';', KEY_SEMICOLON},
+            {u'\'', KEY_APOSTROPHE}, {u',', KEY_COMMA}, {u'.', KEY_DOT},
+            {u'/', KEY_SLASH}, {u'`', KEY_GRAVE}, {u' ', KEY_SPACE},
+            {u'\n', KEY_ENTER}, {u'\t', KEY_TAB}, {u'\b', KEY_BACKSPACE}};
+        return map;
+    }
+
+    const std::unordered_map<char16_t, int> &ShiftedKeys()
+    {
+        static const std::unordered_map<char16_t, int> map = {
+            {u'!', KEY_1}, {u'@', KEY_2}, {u'#', KEY_3}, {u'$', KEY_4},
+            {u'%', KEY_5}, {u'^', KEY_6}, {u'&', KEY_7}, {u'*', KEY_8},
+            {u'(', KEY_9}, {u')', KEY_0}, {u'_', KEY_MINUS}, {u'+', KEY_EQUAL},
+            {u'{', KEY_LEFTBRACE}, {u'}', KEY_RIGHTBRACE}, {u'|', KEY_BACKSLASH},
+            {u':', KEY_SEMICOLON}, {u'"', KEY_APOSTROPHE}, {u'<', KEY_COMMA},
+            {u'>', KEY_DOT}, {u'?', KEY_SLASH}, {u'~', KEY_GRAVE}};
+        return map;
+    }
+
+    // Returns the key code, sets needShift, or -1 when the character is unsupported.
+    int Lookup(char16_t ch, bool &needShift) noexcept
+    {
+        needShift = false;
+
+        if (ch >= u'A' && ch <= u'Z')
+        {
+            needShift = true;
+            auto it = PlainKeys().find(static_cast<char16_t>(ch - u'A' + u'a'));
+            return it != PlainKeys().end() ? it->second : -1;
+        }
+
+        auto plain = PlainKeys().find(ch);
+        if (plain != PlainKeys().end())
+            return plain->second;
+
+        auto shifted = ShiftedKeys().find(ch);
+        if (shifted != ShiftedKeys().end())
+        {
+            needShift = true;
+            return shifted->second;
+        }
 
         return -1;
     }
 
-public:
-    static Napi::Value KeyDown(const Napi::CallbackInfo &info)
+    bool SendText(int fd, const std::u16string &text, char16_t &badChar) noexcept
+    {
+        // Validate up front so a bad character cannot leave half the text typed.
+        for (char16_t ch : text)
+        {
+            bool shift;
+            if (ch != u'\r' && Lookup(ch, shift) < 0)
+            {
+                badChar = ch;
+                return false;
+            }
+        }
+
+        for (char16_t ch : text)
+        {
+            if (ch == u'\r')
+                continue;
+
+            bool needShift;
+            int code = Lookup(ch, needShift);
+
+            if (needShift)
+            {
+                Emit(fd, EV_KEY, KEY_LEFTSHIFT, 1);
+                Emit(fd, EV_SYN, SYN_REPORT, 0);
+            }
+
+            Emit(fd, EV_KEY, code, 1);
+            Emit(fd, EV_SYN, SYN_REPORT, 0);
+            Emit(fd, EV_KEY, code, 0);
+            Emit(fd, EV_SYN, SYN_REPORT, 0);
+
+            if (needShift)
+            {
+                Emit(fd, EV_KEY, KEY_LEFTSHIFT, 0);
+                Emit(fd, EV_SYN, SYN_REPORT, 0);
+            }
+        }
+
+        return true;
+    }
+
+    void ThrowUnsupportedChar(Napi::Env env, char16_t ch)
+    {
+        char buf[160];
+        snprintf(buf, sizeof(buf),
+                 "Kimetra cannot type U+%04X on Linux. uinput sends scan codes, so "
+                 "typeText is limited to US QWERTY printable ASCII. Use the clipboard "
+                 "for other characters.",
+                 static_cast<unsigned>(ch));
+        Napi::Error::New(env, buf).ThrowAsJavaScriptException();
+    }
+
+    Napi::Value KeyDown(const Napi::CallbackInfo &info)
     {
         Napi::Env env = info.Env();
         if (info.Length() == 0 || !info[0].IsNumber())
             return Napi::Boolean::New(env, false);
 
-        int keycode = info[0].As<Napi::Number>().Int32Value();
-        return Napi::Boolean::New(env, SendKey(keycode, true));
+        if (GetDevice() < 0)
+        {
+            Napi::Error::New(env, PERMISSION_HINT).ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+
+        return Napi::Boolean::New(env, SendKey(info[0].As<Napi::Number>().Int32Value(), true));
     }
 
-    static Napi::Value KeyUp(const Napi::CallbackInfo &info)
+    Napi::Value KeyUp(const Napi::CallbackInfo &info)
     {
         Napi::Env env = info.Env();
         if (info.Length() == 0 || !info[0].IsNumber())
             return Napi::Boolean::New(env, false);
 
-        int keycode = info[0].As<Napi::Number>().Int32Value();
-        return Napi::Boolean::New(env, SendKey(keycode, false));
+        if (GetDevice() < 0)
+        {
+            Napi::Error::New(env, PERMISSION_HINT).ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+
+        return Napi::Boolean::New(env, SendKey(info[0].As<Napi::Number>().Int32Value(), false));
     }
 
-    static Napi::Value SendString(const Napi::CallbackInfo &info)
+    Napi::Value SendString(const Napi::CallbackInfo &info)
     {
         Napi::Env env = info.Env();
         if (info.Length() == 0 || !info[0].IsString())
             return Napi::Boolean::New(env, false);
 
-        auto utf16 = info[0].As<Napi::String>().Utf16Value();
-        if (utf16.empty())
-            return Napi::Boolean::New(env, true);
+        int fd = GetDevice();
+        if (fd < 0)
+        {
+            Napi::Error::New(env, PERMISSION_HINT).ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+
+        char16_t bad = 0;
+        if (!SendText(fd, info[0].As<Napi::String>().Utf16Value(), bad))
+        {
+            ThrowUnsupportedChar(env, bad);
+            return env.Undefined();
+        }
+
+        return Napi::Boolean::New(env, true);
+    }
+
+    Napi::Value Sleep(const Napi::CallbackInfo &info)
+    {
+        Napi::Env env = info.Env();
+        if (info.Length() > 0 && info[0].IsNumber())
+        {
+            PreciseSleep(info[0].As<Napi::Number>().Int32Value());
+        }
+        return env.Undefined();
+    }
+
+    // Executes a whole action batch without returning to JS between events.
+    // ops is a flat [opcode, argument] Int32Array; text arguments index into strings.
+    Napi::Value Run(const Napi::CallbackInfo &info)
+    {
+        Napi::Env env = info.Env();
+        if (info.Length() < 2 || !info[0].IsTypedArray() || !info[1].IsNumber())
+            return Napi::Boolean::New(env, false);
 
         int fd = GetDevice();
         if (fd < 0)
         {
-            Napi::Error::New(env,
-                "Cannot open /dev/uinput. Grant access via: "
-                "sudo chmod 0660 /dev/uinput, or add a udev rule: "
-                "KERNEL==\"uinput\", GROUP=\"input\", MODE=\"0660\"")
-                .ThrowAsJavaScriptException();
-            return Napi::Boolean::New(env, false);
+            Napi::Error::New(env, PERMISSION_HINT).ThrowAsJavaScriptException();
+            return env.Undefined();
         }
 
-        bool success = true;
+        Napi::Int32Array ops = info[0].As<Napi::Int32Array>();
+        const int32_t *data = ops.Data();
+        uint32_t count = info[1].As<Napi::Number>().Uint32Value();
+        if (count > ops.ElementLength())
+            count = static_cast<uint32_t>(ops.ElementLength());
 
-        for (char16_t ch : utf16)
+        bool hasStrings = info.Length() > 2 && info[2].IsArray();
+        Napi::Array strings;
+        if (hasStrings)
+            strings = info[2].As<Napi::Array>();
+
+        bool ok = true;
+
+        for (uint32_t i = 0; i + 1 < count; i += 2)
         {
-            int keycode = GetKeyCode(ch);
-            if (keycode < 0)
-                continue;
+            const int32_t arg = data[i + 1];
 
-            bool needShift = RequiresShift(ch);
-
-            if (needShift)
+            switch (data[i])
             {
-                if (!Emit(fd, EV_KEY, KEY_LEFTSHIFT, 1) ||
-                    !Emit(fd, EV_SYN, SYN_REPORT, 0))
+            case OP_DOWN:
+                ok = SendKey(arg, true) && ok;
+                break;
+            case OP_UP:
+                ok = SendKey(arg, false) && ok;
+                break;
+            case OP_SLEEP:
+                PreciseSleep(arg);
+                break;
+            case OP_TEXT:
+                if (hasStrings)
                 {
-                    success = false;
-                    break;
+                    Napi::Value item = strings.Get(static_cast<uint32_t>(arg));
+                    if (item.IsString())
+                    {
+                        char16_t bad = 0;
+                        if (!SendText(fd, item.As<Napi::String>().Utf16Value(), bad))
+                        {
+                            ThrowUnsupportedChar(env, bad);
+                            return env.Undefined();
+                        }
+                    }
                 }
-            }
-
-            if (!Emit(fd, EV_KEY, keycode, 1) ||
-                !Emit(fd, EV_SYN, SYN_REPORT, 0) ||
-                !Emit(fd, EV_KEY, keycode, 0) ||
-                !Emit(fd, EV_SYN, SYN_REPORT, 0))
-            {
-                if (needShift)
-                {
-                    Emit(fd, EV_KEY, KEY_LEFTSHIFT, 0);
-                    Emit(fd, EV_SYN, SYN_REPORT, 0);
-                }
-                success = false;
+                break;
+            default:
                 break;
             }
-
-            if (needShift)
-            {
-                if (!Emit(fd, EV_KEY, KEY_LEFTSHIFT, 0) ||
-                    !Emit(fd, EV_SYN, SYN_REPORT, 0))
-                {
-                    success = false;
-                    break;
-                }
-            }
         }
 
-        return Napi::Boolean::New(env, success);
+        return Napi::Boolean::New(env, ok);
     }
 
-    static Napi::Value Sleep(const Napi::CallbackInfo &info)
+    void Release() noexcept
     {
-        Napi::Env env = info.Env();
-        if (info.Length() < 1 || !info[0].IsNumber())
-            return env.Undefined();
-
-        int micros = info[0].As<Napi::Number>().Int32Value();
-        if (micros < 1)
-            return env.Undefined();
-
-        constexpr int BUSY_WAIT_THRESHOLD = 100000;
-
-        if (micros <= BUSY_WAIT_THRESHOLD)
+        if (g_fd >= 0)
         {
-            struct timespec start, now;
-            clock_gettime(CLOCK_MONOTONIC, &start);
-            long long target = start.tv_sec * 1'000'000LL + start.tv_nsec / 1000 + micros;
-
-            do {
-                clock_gettime(CLOCK_MONOTONIC, &now);
-                if (now.tv_sec * 1'000'000LL + now.tv_nsec / 1000 >= target)
-                    break;
-            } while (true);
+            ioctl(g_fd, UI_DEV_DESTROY);
+            close(g_fd);
+            g_fd = -1;
         }
-        else
-        {
-            int sleepMicros = micros - BUSY_WAIT_THRESHOLD;
-            struct timespec req = {
-                .tv_sec  = sleepMicros / 1'000'000,
-                .tv_nsec = (sleepMicros % 1'000'000) * 1000
-            };
-            nanosleep(&req, nullptr);
-
-            struct timespec start, now;
-            clock_gettime(CLOCK_MONOTONIC, &start);
-            long long target = start.tv_sec * 1'000'000LL + start.tv_nsec / 1000 + BUSY_WAIT_THRESHOLD;
-
-            do {
-                clock_gettime(CLOCK_MONOTONIC, &now);
-                if (now.tv_sec * 1'000'000LL + now.tv_nsec / 1000 >= target)
-                    break;
-            } while (true);
-        }
-
-        return env.Undefined();
     }
 
-    static void Cleanup()
+    Napi::Value Cleanup(const Napi::CallbackInfo &info)
     {
-        if (ufd >= 0)
-        {
-            ioctl(ufd, UI_DEV_DESTROY);
-            close(ufd);
-            ufd = -1;
-        }
+        Release();
+        return info.Env().Undefined();
     }
-};
-
-int KeyboardLinux::ufd = -1;
+}
 
 static Napi::Object Init(Napi::Env env, Napi::Object exports)
 {
-    exports.Set("KeyDown",    Napi::Function::New(env, KeyboardLinux::KeyDown));
-    exports.Set("KeyUp",      Napi::Function::New(env, KeyboardLinux::KeyUp));
-    exports.Set("SendString", Napi::Function::New(env, KeyboardLinux::SendString));
-    exports.Set("Sleep",      Napi::Function::New(env, KeyboardLinux::Sleep));
+    exports.Set("KeyDown", Napi::Function::New(env, KeyDown));
+    exports.Set("KeyUp", Napi::Function::New(env, KeyUp));
+    exports.Set("SendString", Napi::Function::New(env, SendString));
+    exports.Set("Sleep", Napi::Function::New(env, Sleep));
+    exports.Set("Run", Napi::Function::New(env, Run));
+    exports.Set("Cleanup", Napi::Function::New(env, Cleanup));
 
-    env.AddCleanupHook([]() { KeyboardLinux::Cleanup(); });
+    env.AddCleanupHook([]() { Release(); });
 
     return exports;
 }

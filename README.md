@@ -3,271 +3,322 @@
 [![npm version](https://badge.fury.io/js/kimetra.svg)](https://badge.fury.io/js/kimetra)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js Version](https://img.shields.io/node/v/kimetra.svg)](https://nodejs.org)
-[![Platform Support](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue.svg)](#platform-support)
+[![Platform Support](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue.svg)](#platform-setup)
 
 ![Banner](https://raw.githubusercontent.com/saad-devx/kimetra/refs/heads/main/src/assets/banner.jpg)
 
-Kimetra is a cross-platform keyboard automation library for Node.js. It's performance first library which focuses on max speed, precision with no external dependencies at all. It can be easily used for gaming macros as well as any automation tool and script.
+Kimetra is a cross-platform keyboard automation library for Node.js. It is a
+performance first library focused on speed and precision with no external
+dependencies at all. It suits gaming macros just as well as any automation tool
+or script.
 
 ## Features
 
-- **Native Performance**: Direct OS API calls via highly optimized precompiled binaries.
-- **Cross-Platform**: Seamless support for Windows, macOS, and Linux.
-- **Complete Control**: Manipulate single & multiple keys, combinations, typing, and macros with maximum precision.
-- **Easy & Light Weight**: Simple, intuitive API with less than **< 100Kb** size and no external dependencies.
-- **Flexible**: Factory functions, quick actions, and a powerful chainable macro system.
-- **Ultra-Fast & Precise**: Optimized for lightning-fast execution and **microsecond-accurate** delays.
-- **Low-Level Access**: Direct access to platform-specific APIs and precise sleep functions.
-
+- **Native performance**: direct OS API calls through precompiled binaries.
+- **Cross-platform**: Windows, macOS and Linux, with the same key names everywhere.
+- **Batched execution**: a whole action sequence runs inside one native call, so
+  JavaScript adds no latency between key events.
+- **Microsecond timing**: waits target an absolute deadline instead of drifting.
+- **Small**: three exports, no dependencies, one small binary per platform.
+- **Low level access**: the raw addon is always reachable through `ki.core`.
 
 ## How it works
 
-Kimetra uses Node addons built with C++ which uses the OS native APIs for every core functionality. Each addon file is pre-compiled for every major OS and their archs (i.e Linux, Mac and Windows) hence no external dependency needed and not even the compile time overhead, making it ultra fast and reliable on low end systems as well. But it gets better. For each arch of each OS, a separate pre-compiled addon file is created and all of the redudant and key mapping files are removed during the installation time leaving no unuseful bit on user's device. Making its total size less than **< 100Kb** on windows and even lesser on unix systems. Making the it the fastest and most lightweight keyboard automation library.
+Kimetra ships a small C++ addon per platform and architecture, built on
+`SendInput` on Windows, `CGEvent` on macOS and `uinput` on Linux. Nothing is
+compiled at install time. It deletes the binaries and key maps
+which your machine cannot use post install, leaving one binary of well under 150 KB behind.
 
+The npm download itself contains all six binaries, so the download is larger than
+the installed footprint.
 
-## Quick Start
-
-### Installation
+## Install
 
 ```bash
 npm install kimetra
 ```
 
-### Basic Usage
+## Platform setup
 
-```javascript
-const { createKimetra, Key, quickActions } = require('kimetra');
+Windows needs nothing.
+macOS and Linux each need a one-time permission grant else, Kimetra throws with instructions
+if the grant is missing.
 
-// Create the Kimetra instance
-const kimetra = createKimetra();
+### Windows
 
-// Basic operations
-await kimetra.pressKey(Key.enter);
-await kimetra.pressHotkey([Key.ctrl, Key.c]); // Ctrl + C
-await kimetra.pressKeys([Key.a, Key.b, Key.c]); // Press multiple keys in a series
-await kimetra.typeText('Kimetra focuses on max speed, performance, accuracy and being light weight ⚡'); // With Unicode characters support
+No config but one caveat: Windows blocks input from a normal process to a
+window running as administrator. If the target app is elevated, run your script
+elevated too.
 
-// Cleanup when done
-kimetra.cleanup();
+### macOS
 
+Open **System Settings > Privacy & Security > Accessibility** and enable the
+application running your script: Terminal, iTerm, VS Code, or your packaged app.
+If it is already listed, remove it, add it again, then restart the process.
 
-// Quick actions (one-liner usage) - ideal for single operations
-await quickActions.typeText('Touching grass can stabilize body currents and improve your hemispheres to write good code 😎');
-await quickActions.pressKey(Key.enter);
-await quickActions.copy();
-await quickActions.paste();
+macOS invalidates the grant whenever the binary's signature changes. Terminal's
+"Secure Keyboard Entry" and focused password fields block synthetic input entirely.
 
-// For Mac
-await quickActions.cmdCopy();
-await quickActions.cmdPaste();
+### Linux
+
+Kimetra writes to `/dev/uinput`, which works on both X11 and Wayland but needs
+permission:
+
+```bash
+echo 'KERNEL=="uinput", GROUP="input", MODE="0660"' | sudo tee /etc/udev/rules.d/99-kimetra.rules
+sudo usermod -aG input $USER
 ```
 
-## API Reference
+Reboot afterwards, or run the process as root.
 
-### Key Mappings
-
-Kimetra uses the object based key mappings approach inspired by Nut.js. All key names follow 
-the same consistent structure as follows:
-
- - All lower case
- - Include no special characters or spaces
- - Plain english alphabets
-
-For instance:
-
- - `a = a`, `b = b`, `z = z`
- - `lshift = Left Shit key`, `escape =  Esc key`, `up = Up Arrow key`, `f11 = Function 11 key`
- - `semicolon = ;`, `hyphen = -`, `fslash = /`, `bslah = \`, `squarebracketstart = [`
-
-### Main Classes
-
-The main class for keyboard automation operations.
+## Quick start
 
 ```javascript
-const kimetra = createKimetra({
-  defaultDelay: 0, // Default initial delay before an action (µs)
-  defaultInterval: 700, // Default intervals such as between multiple key press utilities (µs)
-  defaultDuration: 700, // Default duration to hold keys (µs)
-  defaultHotkeyDelay: 1500 // Default duration for hotkey combinations (µs)
+import { Kimetra } from 'kimetra';
+// or in CommonJS
+const { Kimetra } = require('kimetra');
+
+const options = {
+  unit: 'microsecond', // 'microsecond' (default) or 'millisecond'
+  delay: 0,            // delay before an action starts
+  interval: 700,       // gap between repeated actions
+  duration: 700,       // how long a single key is held
+  hotkeyDelay: 1500    // how long a combination is held before release
+}
+
+const ki = Kimetra(options); // whole options object is optional (more on it below)
+
+await ki.pressKey('enter');
+await ki.pressHotkey(['ctrl', 'c']);
+await ki.pressKeys(['a', 'b', 'c']);
+await ki.typeText('Kimetra focuses on speed, precision and staying small');
+
+ki.cleanup();
+```
+
+## Key names
+
+Keys are plain strings. Names are lower case, with no spaces or punctuation.
+
+```javascript
+await ki.pressKey('a');
+await ki.pressKey('f11');
+await ki.pressHotkey(['ctrl', 'shift', 'escape']);
+```
+
+| Group | Names |
+| --- | --- |
+| Letters and digits | `a` to `z`, `0` to `9` |
+| Function keys | `f1` to `f20` |
+| Modifiers | `ctrl`, `shift`, `alt`, `meta` & `lctrl`, `rshift`, `lalt`, `lmeta` |
+| Control | `enter`, `escape`, `space`, `tab`, `backspace`, `delete`, `capslock` |
+| Navigation | `up`, `down`, `left`, `right`, `home`, `end`, `pageup`, `pagedown` |
+| Numpad | `numpad0` to `numpad9`, `numpadadd`, `numpadsubtract`, `numpadmultiply`, `numpaddivide`, `numpaddecimal` |
+| Symbols | `semicolon`, `equal`, `comma`, `hyphen`, `dot`, `fslash`, `bslash`, `grave`, `quote`, `squarebracketstart`, `squarebracketend` |
+| Volume | `volumemute`, `volumedown`, `volumeup` |
+
+`ctrl`, `shift`, `alt` and `meta` resolve to the left-hand key. Use `lctrl` or
+`rctrl` when the side matters. `meta` is the Windows key, the Command key on
+macOS and the Super key on Linux, and also answers to `cmd`, `win` and `super`.
+
+Everything above works on all three platforms. Keys that only some platforms
+have, such as `insert`, `printscreen`, `numlock`, the media transport keys and
+the browser keys, throw a clear error where the OS has no such key. Your editor
+will flag them through the TypeScript definitions.
+## API
+
+The package exports exactly three things.
+
+```javascript
+const { Kimetra, Kimacro, Key } = require('kimetra');
+```
+
+### Kimetra(options)
+
+```javascript
+const ki = Kimetra({
+  unit: 'microsecond', // 'microsecond' (default) or 'millisecond'
+  delay: 0,            // delay before an action starts
+  interval: 700,       // gap between repeated actions
+  duration: 700,       // how long a single key is held
+  hotkeyDelay: 1500    // how long a combination is held before release
 });
 ```
 
-**Methods:**
+`unit` decides how Kimetra reads the numbers **you** pass, both in the options
+above and in every method argument. In millisecond mode `ki.pressKey('a', 5)`
+holds the key for 5 milliseconds. In microsecond mode the same call holds it for
+5 microseconds.
 
-- \`pressKey(key, duration?, delay?)\` - Press a single key with optional duration and initial delay.
-- \`pressKeys(keys[], interval?, delay?)\` - Press multiple keys in sequence with customizable interval and initial delay.
-- \`pressHotkey(keys[], duration?, delay?)\` - Perform a key combination (hotkey) with specified hold duration and initial delay.
-- \`typeText(text, delay?)\` - Type text character by character with an optional initial delay.
-- \`holdKey(key, duration?, delay?)\` - Hold a key for a specified duration with an optional initial delay.
-- \`repeatKey(key, times, interval?, delay?)\` - Repeat key press multiple times with customizable interval and initial delay.
-- \`executeSequence(actions[])\` - Execute a defined sequence of keyboard actions.
-- \`cleanup()\` - Release native resources when automation tasks are complete.
+It does not change the built-in defaults. Those are fixed real durations, so a
+key you never gave a duration for is held for 700 microseconds either way.
+Switching units never silently retimes anything you did not write yourself.
 
-#### Keyboard Macros
+| Call | microsecond mode | millisecond mode |
+| --- | --- | --- |
+| `pressKey('a')` | 700 µs hold | 700 µs hold |
+| `pressKey('a', 5)` | 5 µs hold | 5 ms hold |
+| `sleep(500)` | 500 µs | 500 ms |
 
-Create and execute sequences of keyboard actions with a fluent, chainable API for complex automations.
+Pick a unit once and stay with it. The same snippet means different things under
+different units.
+
+**Methods**
+
+| Method | Description |
+| --- | --- |
+| `pressKey(key, duration?, delay?)` | Press and release a key, holding it for `duration`. |
+| `pressKeys(keys[], interval?, delay?)` | Press several keys one after another. |
+| `pressHotkey(keys[], duration?, delay?)` | Press keys together, releasing in reverse order. |
+| `repeatKey(key, times, interval?, delay?)` | Press the same key `times` times. |
+| `typeText(text, delay?)` | Type text. |
+| `keyDown(key, delay?)` | Press a key down and leave it held. |
+| `keyUp(key, delay?)` | Release a held key. |
+| `sleep(duration)` | Block for `duration`. |
+| `executeSequence(actions[])` | Run a list of actions as one batch. |
+| `cleanup()` | Release native resources. Safe to call more than once. |
+
+All of these return a promise. To hold a key for two seconds, pass a duration:
 
 ```javascript
-const { createKimacro, Key } = require('kimetra');
-
-// Create a macro with a sequence of actions
-const macro = createKimacro()
-  .pressKey(Key.enter)
-  .typeText('Drinking plenty water can make you chad 🗿')
-  .pressHotkey([Key.ctrl, Key.s])
-  .wait(1000 * 1000); // Wait for 1 second (100,00,00 microseconds)
-
-// Execute the macro
-await macro.execute();
+await ki.pressKey('shift', 2000000); // two seconds in microseconds
 ```
 
-**Macro Methods:**
+### Editing shortcuts
 
-- \`pressKey(key, duration?, delay?)\` - Add key press action to the sequence.
-- \`typeText(text, delay?)\` - Add text typing action to the sequence.
-- \`pressHotkey(keys[], duration?, delay?)\` - Add hotkey combination action to the sequence.
-- \`wait(duration)\` - Add a delay (in milliseconds) to the macro sequence.
-- \`execute()\` - Run the defined macro sequence.
-- \`toJSON()\` - Serialize the macro sequence for storage.
-- \`fromJSON(data)\` - Load a macro from serialized data.
-- \`cleanup()\` - Clear the macro sequence and release associated resources.
-
-### Quick Actions
-
-Convenient functions for one-time keyboard operations without the need to create a `Kimetra` instance.
+These resolve to the chord each platform actually uses, so the same call works
+everywhere. Cmd on macOS, Ctrl elsewhere.
 
 ```javascript
-const { quickActions } = require('kimetra');
-
-await quickActions.pressKey(Key.enter);
-await quickActions.pressHotkey([Key.ctrl, Key.c]);
-await quickActions.typeText('For max performance, `Kimetra` class be used directly because each quickAction function initializes and cleans up the class each time you use it. 🤯');
-await quickActions.copy();
-await quickActions.paste();
-await quickActions.altTab();
+await ki.copy();
+await ki.paste();
+await ki.cut();
+await ki.selectAll();
+await ki.undo();
+await ki.redo();    // Ctrl+Y on Windows, Cmd+Shift+Z on macOS, Ctrl+Shift+Z on Linux
+await ki.save();
+await ki.find();
+await ki.replace(); // Ctrl+H, or Cmd+Option+F on macOS
 ```
 
-### Convenience Methods
-
-Pre-built methods for common and platform-specific keyboard operations, simplifying complex tasks.
+Anything else is a hotkey. There is no separate `cmd` family and no aliases for
+single keys:
 
 ```javascript
-// Text editing
-await kimetra.copy();
-await kimetra.paste();
-await kimetra.cut();
-await kimetra.selectAll();
-await kimetra.undo();
-await kimetra.redo();
-await kimetra.save();
-await kimetra.find();
-await kimetra.replace();
-
-// Navigation
-await kimetra.altTab();
-await kimetra.altF4();
-await kimetra.winKey();
-await kimetra.taskManager();
-await kimetra.enter();
-await kimetra.escape();
-await kimetra.tab(3); // Press tab 3 times
-
-// Special keys
-await kimetra.space(2); // Press space twice
-await kimetra.backspace(3); // Press backspace 3 times
-await kimetra.delete();
-
-// Arrow keys
-await kimetra.arrowUp(5, 100); // 5 times with 100 microsecond interval
-await kimetra.arrowDown();
-await kimetra.arrowLeft();
-await kimetra.arrowRight();
-
-// Function keys
-await kimetra.f1();
-await kimetra.f5(); // Refresh
-await kimetra.f12();
-
-// macOS specific (automatically mapped to Cmd key)
-await kimetra.cmdCopy();
-await kimetra.cmdPaste();
-await kimetra.cmdCut();
-await kimetra.cmdSave();
-await kimetra.cmdTab();
+await ki.pressHotkey(['alt', 'f4']);
+await ki.pressKey('meta');
+await ki.repeatKey('tab', 3);
+await ki.repeatKey('up', 5, 100);
 ```
 
-## Advanced Usage
+### Sequences
 
-### Sequence Execution
-
-For highly customized and complex automation sequences, providing granular control over each step.
+A sequence compiles into one native call, which makes it the fastest way to run
+several actions.
 
 ```javascript
-await kimetra.executeSequence([
-  { type: 'hotkey', keys: [Key.alt, Key.tab], delay: 1000 }, // Delay in microseconds
-  { type: 'wait', duration: 500000 }, // Wait in microseconds (500ms)
-  { type: 'type', text: 'Sequence text', interval: 20 }, // Interval in microseconds
-  { type: 'key', key: Key.enter },
-  { type: 'hold', key: Key.lshift, duration: 1000000 } // Duration in microseconds (1 second)
+await ki.executeSequence([
+  { type: 'hotkey', keys: ['alt', 'tab'] },
+  { type: 'wait', duration: 500000 },
+  { type: 'text', text: 'Sequence text' },
+  { type: 'key', key: 'enter' },
+  { type: 'repeat', key: 'down', times: 3, interval: 1000 },
+  { type: 'keys', keys: ['a', 'b'], interval: 2000 }
 ]);
 ```
 
-### Macro System
+| Action | Fields |
+| --- | --- |
+| `key` | `key`, `duration?`, `delay?` |
+| `keys` | `keys[]`, `interval?`, `delay?` |
+| `hotkey` | `keys[]`, `duration?`, `delay?` |
+| `repeat` | `key`, `times`, `interval?`, `delay?` |
+| `text` | `text`, `delay?` |
+| `wait` | `duration` |
 
-Create, save, and load complex automation macros for reusable and shareable workflows.
+### Kimacro(options)
+
+A chainable builder over the same sequences, with JSON serialisation. A macro can
+be replayed as often as you like.
 
 ```javascript
-const { createKimacro } = require('kimetra');
+const { Kimacro } = require('kimetra');
+
+const macro = Kimacro()
+  .pressKey('enter')
+  .typeText('hello')
+  .pressHotkey(['ctrl', 's'])
+  .wait(1000000);
+
+await macro.exec();
+await macro.exec(); // runs again, the sequence is kept
+```
+
+Saving and loading:
+
+```javascript
 const fs = require('fs');
 
-// Create and save a macro
-const loginMacro = createKimacro()
-  .typeText('johndoe')
-  .pressKey(Key.tab)
-  .typeText('password123')
-  .pressKey(Key.enter);
+fs.writeFileSync('login.json', JSON.stringify(macro.toJSON()));
 
-// Save to JSON
-const macroData = loginMacro.toJSON();
-fs.writeFileSync('login-macro.json', JSON.stringify(macroData));
-
-// Load from JSON
-const savedData = JSON.parse(fs.readFileSync('login-macro.json'));
-const loadedMacro = createKimacro().fromJSON(savedData);
-
-// Execute the loaded macro
-await loadedMacro.exec();
+const loaded = Kimacro().fromJSON(JSON.parse(fs.readFileSync('login.json')));
+await loaded.exec();
 ```
 
-### Low-Level API Access
+`Kimacro` takes the same options as `Kimetra`, and also has `add(action)`,
+`clear()` and `cleanup()`.
 
-Kimetra provides direct access to its low-level, platform-specific implementations for advanced users requiring maximum control or custom functionality. This includes the highly accurate `Sleep` function as well with microseconds accuracy. Using native `Sleep` function is highly recommended instead of JS's `setTimeout` with Promise. Using pure JS among native events will add an extra latency of contexts switching overhead.
+### Low level access
+
+`ki.core` is the raw addon. Everything there works in key codes and microseconds
+regardless of the instance options, which is what `Key` is for.
 
 ```javascript
-const { Kimetra } = require('kimetra');
+const { Kimetra, Key } = require('kimetra');
 
-const kimetra = new Kimetra();
-const kiCore = kimetra.core; // `core` contains every C++ addon function i.e. KeyDown, KeyUp, SendString, Sleep and Cleanup
+const ki = Kimetra();
+const core = ki.core;
 
-// Access platform-specific methods
-kiCore.KeyDown(Key.enter);  // Press key down
-kiCore.Sleep(500)           // Wait for 500µs
-kiCore.KeyUp(Key.enter);    // Release key
-kiCore.Sleep(1000000)
-// Send a string with unicode characters
-kiCore.SendString(`👀 Fun fact: The name "Kimetra" is a combination of "Key" + "Simulation" + "Spectra".
-"Metra" also means "Womb", the low level place where it all started.`);
+core.KeyDown(Key.enter);
+core.Sleep(500);
+core.KeyUp(Key.enter);
 
-// Get information about the current platform
-console.log(`Current platform: ${kimetra.os}`); // Use kimetra.os
+core.SendString('Kimetra is Key plus Simulation plus Spectra');
 
-// Precise sleep function (microseconds accuracy)
-await kimetra.sleep(100); // Sleep for 100 microseconds
-
-// Always clean up when done
-kimetra.cleanup();
+console.log(ki.os, ki.arch);
+ki.cleanup();
 ```
 
+`core` exposes `KeyDown`, `KeyUp`, `SendString`, `Sleep`, `Run` and `Cleanup`.
+`Sleep` is more accurate than `setTimeout` and avoids the scheduling overhead of
+returning to the event loop.
 
-## 📄 License
+## Notes
+
+**Execution is synchronous.** The methods return promises so that `await` reads
+naturally and so real concurrency can be added later, but the work happens in a
+blocking native call. A one second wait blocks the event loop for one second. Use
+short waits inside sequences, and keep long pauses in JavaScript.
+
+**Linux text is US ASCII.** `uinput` sends scan codes, so `typeText` on Linux can
+only produce what a US QWERTY layout produces. Anything else throws and names the
+character. Windows and macOS inject unicode directly and handle any text. Use the
+clipboard for unicode on Linux.
+
+**Layouts matter.** Key names describe physical keys. On a non-US layout, `quote`
+is whatever your layout puts on that key.
+
+**Newline and tab** are sent as real Enter and Tab key presses on every platform,
+so `typeText('a\nb')` behaves the same everywhere.
+
+## Supported targets
+
+`win32-x64`, `win32-ia32`, `darwin-x64`, `darwin-arm64`, `linux-x64`,
+`linux-ia32`. Node 16 or newer.
+
+Anything else, including `linux-arm64` and Alpine, fails at require time with a
+message naming your platform.
+
+## License
+
 MIT © Saad

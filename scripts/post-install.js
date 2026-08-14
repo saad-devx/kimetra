@@ -1,53 +1,48 @@
+/**
+ * Removes the binaries and key maps this machine cannot use.
+ *
+ * This is a size optimisation only. Kimetra resolves its binary at runtime, so a
+ * skipped or failed post-install (--ignore-scripts, pnpm, Yarn PnP) leaves a
+ * working package behind, just a larger one.
+ */
+
 const fs = require('fs');
 const path = require('path');
 
-function cleanBinariesAndCore() {
-    const platform = process.platform;   // 'win32', 'darwin', 'linux'
-    const arch = process.arch;           // 'x64', 'ia32', 'arm64', etc.
+const root = path.resolve(__dirname, '..');
 
-    const binName = `${platform}${arch}.node`;
-
-    const binDir = path.resolve(__dirname, '../src/bin');
-    const coreDir = path.resolve(__dirname, '../src/core');
-    const kimetraFile = path.resolve(__dirname, '../src/kimetra.js');
-
-    // 1. Cleaning redundant binaries
-    try {
-        const binFiles = fs.readdirSync(binDir);
-        for (const file of binFiles) {
-            if (file.endsWith('.node') && file !== binName) {
-                try {
-                    fs.unlinkSync(path.join(binDir, file));
-                } catch (_) { }
-            }
-        }
-    } catch (err) { }
-
-    // 2. Cleaning redundant cores
-    const coreFileName = `${platform}.js`;
-    try {
-        const coreFiles = fs.readdirSync(coreDir);
-        for (const file of coreFiles) {
-            if (file.endsWith('.js') && file !== coreFileName) {
-                try {
-                    fs.unlinkSync(path.join(coreDir, file));
-                } catch (_) { }
-            }
-        }
-    } catch (err) { }
-
-    // Replacing placeholders in kimetra.js
-    try {
-        let code = fs.readFileSync(kimetraFile, 'utf8');
-        const keymapPath = `./core/${platform}`;
-        const binaryPath = `./bin/${platform}${arch}`;
-
-        code = code
-            .replace(/require\(['"]\.\/core\/win32\.js['"]\)/g, `require('${keymapPath}')`)
-            .replace(/require\(['"]\.\/bin\/win32x64\.node['"]\)/g, `require('${binaryPath}')`);
-
-        fs.writeFileSync(kimetraFile, code, 'utf8');
-    } catch (_) { }
+// Never trim a source checkout, where the other platforms' files are tracked.
+if (fs.existsSync(path.join(root, '.git'))) {
+    process.exit(0);
 }
 
-cleanBinariesAndCore();
+const binDir = path.join(root, 'src', 'bin');
+const coreDir = path.join(root, 'src', 'core');
+const binary = `${process.platform}${process.arch}.node`;
+const keymap = `${process.platform}.js`;
+
+// If the file this platform needs is missing, keep everything for diagnosis.
+if (!fs.existsSync(path.join(binDir, binary)) || !fs.existsSync(path.join(coreDir, keymap))) {
+    process.exit(0);
+}
+
+function trim(dir, keep, extension) {
+    let entries;
+    try {
+        entries = fs.readdirSync(dir);
+    } catch {
+        return;
+    }
+
+    for (const entry of entries) {
+        if (entry === keep || !entry.endsWith(extension)) continue;
+        try {
+            fs.unlinkSync(path.join(dir, entry));
+        } catch {
+            // A read-only install is fine, it just stays at full size.
+        }
+    }
+}
+
+trim(binDir, binary, '.node');
+trim(coreDir, keymap, '.js');

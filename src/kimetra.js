@@ -1,410 +1,406 @@
+'use strict';
+
 const OS = process.platform;
 const ARCH = process.arch;
-const KeyMap = require('./core/win32.js')
-const Binary = require('./bin/win32x64.node')
+
+// Batch opcodes, mirrored in the native addons.
+const OP_DOWN = 0;
+const OP_UP = 1;
+const OP_SLEEP = 2;
+const OP_TEXT = 3;
+
+// Gap between the individual key events of a combination. Native execution has no
+// incidental scheduling delay, so the gap has to be explicit for applications to
+// register a modifier before the key that follows it.
+const KEY_GAP = 1000;
+
+const TARGETS = 'win32-x64, win32-ia32, darwin-x64, darwin-arm64, linux-x64, linux-ia32';
+
+const REJECTED = OS === 'win32'
+    ? 'The OS rejected the input. The focused window is most likely running elevated, ' +
+      'in which case this process has to run elevated as well.'
+    : 'The OS rejected the input.';
+
+function loadKeymap() {
+    try {
+        return require('./core/' + OS + '.js');
+    } catch (err) {
+        throw new Error(`Kimetra does not support "${OS}". Supported platforms: win32, darwin, linux.`);
+    }
+}
+
+function loadBinary() {
+    try {
+        return require('./bin/' + OS + ARCH + '.node');
+    } catch (err) {
+        throw new Error(
+            `Kimetra has no prebuilt binary for ${OS}-${ARCH}. Supported targets: ${TARGETS}. ` +
+            `(${err.message})`
+        );
+    }
+}
+
+const Key = Object.freeze(loadKeymap());
+const Binary = loadBinary();
+
+/** Resolves a key name to its platform code. Numbers pass through unchanged. */
+function code(key) {
+    if (typeof key === 'number') return key;
+
+    const resolved = Key[key];
+    if (resolved === undefined) {
+        throw new Error(`Unknown key "${key}" on ${OS}.`);
+    }
+    return resolved;
+}
+
+function codes(keys) {
+    const out = new Array(keys.length);
+    for (let i = 0; i < keys.length; i++) {
+        out[i] = code(keys[i]);
+    }
+    return out;
+}
+
+// Editing shortcuts differ per platform, so they are resolved to key codes once at
+// load time and never recomputed.
+const MOD = OS === 'darwin' ? 'meta' : 'ctrl';
+
+const SHORTCUTS = {
+    copy: [MOD, 'c'],
+    paste: [MOD, 'v'],
+    cut: [MOD, 'x'],
+    selectAll: [MOD, 'a'],
+    undo: [MOD, 'z'],
+    save: [MOD, 's'],
+    find: [MOD, 'f'],
+    redo: OS === 'win32' ? ['ctrl', 'y'] : [MOD, 'shift', 'z'],
+    replace: OS === 'darwin' ? ['meta', 'alt', 'f'] : ['ctrl', 'h']
+};
+
+for (const name of Object.keys(SHORTCUTS)) {
+    SHORTCUTS[name] = codes(SHORTCUTS[name]);
+}
 
 class Kimetra {
-    /**
-     * @typedef {Object} KimetraOptions
-     * @property {number} [delay=0] - Initial delay before starting actions (μs)
-     * @property {number} [interval=700] - Time between repeated actions (μs)
-     * @property {number} [duration=700] - How long a single key press is held (μs)
-     * @property {number} [hotkeyDelay=1500] - Delay specifically for multi-key combinations (μs)
-     */
-
-    /** @param {KimetraOptions} options */
     constructor(options = {}) {
-        if (!Binary) {
-            throw new Error(`Kimetra is not supported on this platform: ${OS}`);
-        }
+        const scale = options.unit === 'millisecond' ? 1000 : 1;
 
-        // roots
         this.os = OS;
         this.arch = ARCH;
-        this.core = Binary
-        this.sleep = Binary.Sleep
+        this.core = Binary;
+        this.unit = scale === 1000 ? 'millisecond' : 'microsecond';
 
-        // options
-        this.defaultDelay = options.delay || 0;
-        this.defaultInterval = options.interval || 700;
-        this.defaultDuration = options.duration || 700;
-        this.defaultHotkeyDelay = options.hotkeyDelay || 1500;
+        // Defaults are stored in microseconds; only caller supplied values are scaled.
+        this._scale = scale;
+        this.delay = options.delay !== undefined ? options.delay * scale : 0;
+        this.interval = options.interval !== undefined ? options.interval * scale : 700;
+        this.duration = options.duration !== undefined ? options.duration * scale : 700;
+        this.hotkeyDelay = options.hotkeyDelay !== undefined ? options.hotkeyDelay * scale : 1500;
+
+        this._ops = new Int32Array(64);
+        this._len = 0;
+        this._texts = [];
     }
 
-    /**
-     * Press a key down
-     * @param {string} key - Key to press
-     */
-    async keyDown(keyCode, delay = this.defaultDelay) {
-        if (keyCode === undefined) {
-            throw new Error(`Unsupported key: ${key}`);
-        }
-        if (delay > 0) {
-            await Binary.Sleep(delay);
-        }
-        Binary.KeyDown(keyCode);
+    // ==================================================
+    // BATCH BUILDING
+    // ==================================================
+
+    _us(value, fallback) {
+        return value === undefined ? fallback : value * this._scale;
     }
 
-    /**
-     * Release a key
-     * @param {string} key - Key to release
-     */
-    async keyUp(keyCode, delay = this.defaultDelay) {
-        if (keyCode === undefined) {
-            throw new Error(`Unsupported key: ${key}`);
+    _push(op, arg) {
+        if (this._len + 2 > this._ops.length) {
+            const grown = new Int32Array(this._ops.length * 2);
+            grown.set(this._ops);
+            this._ops = grown;
         }
-        if (delay > 0) {
-            await Binary.Sleep(delay);
-        }
-        Binary.KeyUp(keyCode);
+        this._ops[this._len++] = op;
+        this._ops[this._len++] = arg;
     }
 
-    /**
-     * Press and release a key
-     * @param {string} key - Key to press
-     * @param {number} duration - Duration to hold key in milliseconds
-     */
-    async pressKey(keyCode, duration = this.defaultDuration, delay = this.defaultDelay) {
-        if (keyCode === undefined) {
-            throw new Error(`Unsupported key: ${key}`);
-        }
-        if (delay > 0) {
-            await Binary.Sleep(delay);
-        }
-        Binary.KeyDown(keyCode);
-        await Binary.Sleep(duration);
-        Binary.KeyUp(keyCode);
+    _buildKey(keyCode, duration, delay) {
+        if (delay > 0) this._push(OP_SLEEP, delay);
+        this._push(OP_DOWN, keyCode);
+        if (duration > 0) this._push(OP_SLEEP, duration);
+        this._push(OP_UP, keyCode);
     }
 
-    /**
-     * Type text with unicode chars support
-     * @param {string} text - Text to type
-     */
-    async typeText(string, delay = this.defaultDelay) {
-        if (delay > 0) {
-            await Binary.Sleep(delay);
-        }
-        Binary.SendString(string);
-    }
-
-    /**
-     * Press multiple keys in sequence
-     * @param {string[]} keys - Array of keys to press
-     * @param {number} interval - Interval between key presses (μs)
-     * @param {number} delay - Initial delay (μs)
-     */
-    async pressKeys(keys, interval = this.defaultInterval, delay = this.defaultDelay) {
-        if (delay > 0) {
-            await Binary.Sleep(delay);
-        }
-        for (let i = 0; i < keys.length; i++) {
-            if (delay > 0) {
-                await Binary.Sleep(interval);
-            }
-            Binary.KeyDown(keys[i]);
-            await Binary.Sleep(this.defaultDuration);
-            Binary.KeyUp(keys[i]);
+    _buildSeries(keyCodes, interval, delay) {
+        if (delay > 0) this._push(OP_SLEEP, delay);
+        for (let i = 0; i < keyCodes.length; i++) {
+            if (i > 0 && interval > 0) this._push(OP_SLEEP, interval);
+            this._push(OP_DOWN, keyCodes[i]);
+            if (this.duration > 0) this._push(OP_SLEEP, this.duration);
+            this._push(OP_UP, keyCodes[i]);
         }
     }
 
-    /**
-     * Press key combination (hotkey)
-     * @param {string[]} keys - Array of keys to press simultaneously
-     * @param {number} duration - Duration to hold keys (μs)
-     * @param {number} delay - Delay before action (μs)
-     */
-    async pressHotkey(keys, duration = this.defaultHotkeyDelay, delay = this.defaultDelay) {
-        if (delay > 0) {
-            await Binary.Sleep(delay);
+    _buildHotkey(keyCodes, duration, delay) {
+        if (delay > 0) this._push(OP_SLEEP, delay);
+
+        for (let i = 0; i < keyCodes.length; i++) {
+            this._push(OP_DOWN, keyCodes[i]);
+            this._push(OP_SLEEP, KEY_GAP);
         }
 
-        // Pressing down all keys
-        for (const key of keys) {
-            Binary.KeyDown(key);
-            await Binary.Sleep(5);
-        }
+        if (duration > 0) this._push(OP_SLEEP, duration);
 
-        await Binary.Sleep(duration);
-
-        // Releasing keys in reverse order
-        for (let i = keys.length - 1; i >= 0; i--) {
-            Binary.KeyUp(keys[i]);
-            await Binary.Sleep(2);
+        for (let i = keyCodes.length - 1; i >= 0; i--) {
+            this._push(OP_UP, keyCodes[i]);
+            this._push(OP_SLEEP, KEY_GAP);
         }
     }
 
-    /**
-     * Hold a key for a specific duration
-     * @param {string} key - Key to hold
-     * @param {number} duration - Duration to hold (μs)
-     * @param {number} delay - Delay before action (μs)
-     */
-    async holdKey(keyCode, duration = 1000, delay = this.defaultDelay) {
-        if (keyCode === undefined) {
-            throw new Error(`Unsupported key: ${key}`);
-        }
-        if (delay > 0) {
-            await Binary.Sleep(delay);
-        }
-
-        Binary.KeyDown(keyCode);
-        await Binary.Sleep(duration);
-        Binary.KeyUp(keyCode);
-    }
-
-    /**
-     * Repeat a key press multiple times
-     * @param {string} key - Key to repeat
-     * @param {number} times - Number of repetitions
-     * @param {number} interval - Interval between repetitions (μs)
-     * @param {number} delay - Initial delay (μs)
-     */
-    async repeatKey(keyCode, times, interval = 50, delay = this.defaultDelay) {
-        if (keyCode === undefined) {
-            throw new Error(`Unsupported key: ${key}`);
-        }
-        if (delay > 0) {
-            await Binary.Sleep(delay);
-        }
-
+    _buildRepeat(keyCode, times, interval, delay) {
+        if (delay > 0) this._push(OP_SLEEP, delay);
         for (let i = 0; i < times; i++) {
-            await this.pressKey(keyCode);
-            if (i < times - 1 && interval > 0) {
-                await Binary.Sleep(interval);
-            }
+            if (i > 0 && interval > 0) this._push(OP_SLEEP, interval);
+            this._push(OP_DOWN, keyCode);
+            if (this.duration > 0) this._push(OP_SLEEP, this.duration);
+            this._push(OP_UP, keyCode);
         }
     }
 
-    /**
-     * Execute a sequence of keyboard actions
-     * @param {Array} actions - Array of action objects
-     */
+    _buildText(text, delay) {
+        if (delay > 0) this._push(OP_SLEEP, delay);
+        this._texts.push(String(text));
+        this._push(OP_TEXT, this._texts.length - 1);
+    }
+
+    /** Hands the whole batch to native in one call and resets the buffer. */
+    _run() {
+        const length = this._len;
+        const texts = this._texts;
+        this._len = 0;
+
+        let ok;
+        try {
+            ok = Binary.Run(this._ops, length, texts);
+        } finally {
+            if (texts.length) texts.length = 0;
+        }
+
+        if (ok === false) throw new Error(REJECTED);
+        return true;
+    }
+
+    // ==================================================
+    // CORE ACTIONS
+    // ==================================================
+
+    /** Presses a key down and leaves it held. */
+    async keyDown(key, delay) {
+        const wait = this._us(delay, this.delay);
+        if (wait > 0) this._push(OP_SLEEP, wait);
+        this._push(OP_DOWN, code(key));
+        return this._run();
+    }
+
+    /** Releases a held key. */
+    async keyUp(key, delay) {
+        const wait = this._us(delay, this.delay);
+        if (wait > 0) this._push(OP_SLEEP, wait);
+        this._push(OP_UP, code(key));
+        return this._run();
+    }
+
+    /** Presses and releases a key, holding it down for `duration`. */
+    async pressKey(key, duration, delay) {
+        this._buildKey(code(key), this._us(duration, this.duration), this._us(delay, this.delay));
+        return this._run();
+    }
+
+    /** Presses several keys one after another. */
+    async pressKeys(keys, interval, delay) {
+        this._buildSeries(codes(keys), this._us(interval, this.interval), this._us(delay, this.delay));
+        return this._run();
+    }
+
+    /** Presses keys together as a combination, releasing them in reverse order. */
+    async pressHotkey(keys, duration, delay) {
+        this._buildHotkey(codes(keys), this._us(duration, this.hotkeyDelay), this._us(delay, this.delay));
+        return this._run();
+    }
+
+    /** Presses the same key `times` times. */
+    async repeatKey(key, times, interval, delay) {
+        this._buildRepeat(code(key), times, this._us(interval, this.interval), this._us(delay, this.delay));
+        return this._run();
+    }
+
+    /** Types text. Unicode is supported on Windows and macOS. */
+    async typeText(text, delay) {
+        this._buildText(text, this._us(delay, this.delay));
+        return this._run();
+    }
+
+    /** Blocks for `duration` with microsecond accuracy. */
+    async sleep(duration) {
+        Binary.Sleep(duration * this._scale);
+        return true;
+    }
+
+    /** Compiles an entire action list into a single native call. */
     async executeSequence(actions) {
-        const actTypes = {
-            key: (a) => this.pressKey(a.key, a.duration, a.delay),
-            hotkey: (a) => this.pressHotkey(a.keys, a.duration, a.delay),
-            type: (a) => this.typeText(a.text, a.delay),
-            hold: (a) => this.holdKey(a.key, a.duration, a.delay),
-            wait: (a) => Binary.Sleep(a.interval || this.defaultInterval)
-        };
+        try {
+            this._compile(actions);
+        } catch (err) {
+            // Never leave a half built batch behind for the next call to replay.
+            this._len = 0;
+            this._texts.length = 0;
+            throw err;
+        }
 
+        return this._run();
+    }
+
+    _compile(actions) {
         for (const action of actions) {
-            const actFn = actTypes[action.type];
-            if (actFn) {
-                await actFn(action);
-            } else {
-                console.warn(`Unknown action type: ${action.type}`);
+            switch (action.type) {
+                case 'key':
+                    this._buildKey(
+                        code(action.key),
+                        this._us(action.duration, this.duration),
+                        this._us(action.delay, this.delay)
+                    );
+                    break;
+                case 'keys':
+                    this._buildSeries(
+                        codes(action.keys),
+                        this._us(action.interval, this.interval),
+                        this._us(action.delay, this.delay)
+                    );
+                    break;
+                case 'hotkey':
+                    this._buildHotkey(
+                        codes(action.keys),
+                        this._us(action.duration, this.hotkeyDelay),
+                        this._us(action.delay, this.delay)
+                    );
+                    break;
+                case 'repeat':
+                    this._buildRepeat(
+                        code(action.key),
+                        action.times,
+                        this._us(action.interval, this.interval),
+                        this._us(action.delay, this.delay)
+                    );
+                    break;
+                case 'text':
+                    this._buildText(action.text, this._us(action.delay, this.delay));
+                    break;
+                case 'wait':
+                    this._push(OP_SLEEP, this._us(action.duration, this.interval));
+                    break;
+                default:
+                    throw new Error(`Unknown action type "${action.type}".`);
             }
         }
     }
 
-    // ====================
-    // CONVENIENCE METHODS
-    // ====================
+    // ==================================================
+    // EDITING SHORTCUTS
+    // ==================================================
+    // Cmd on macOS, Ctrl elsewhere, with redo and replace using the chord each
+    // platform actually expects.
 
-    // Text editing shortcuts
-    async copy(hotkeyDelay = this.defaultHotkeyDelay, delay = this.defaultDelay) { return this.pressHotkey([KeyMap.ctrl, KeyMap.c], hotkeyDelay, delay); }
-    async paste(hotkeyDelay = this.defaultHotkeyDelay, delay = this.defaultDelay) { return this.pressHotkey([KeyMap.ctrl, KeyMap.v], hotkeyDelay, delay); }
-    async cut(hotkeyDelay = this.defaultHotkeyDelay, delay = this.defaultDelay) { return this.pressHotkey([KeyMap.ctrl, KeyMap.x], hotkeyDelay, delay); }
-    async selectAll(hotkeyDelay = this.defaultHotkeyDelay, delay = this.defaultDelay) { return this.pressHotkey([KeyMap.ctrl, KeyMap.a], hotkeyDelay, delay); }
-    async undo(hotkeyDelay = this.defaultHotkeyDelay, delay = this.defaultDelay) { return this.pressHotkey([KeyMap.ctrl, KeyMap.z], hotkeyDelay, delay); }
-    async redo(hotkeyDelay = this.defaultHotkeyDelay, delay = this.defaultDelay) { return this.pressHotkey([KeyMap.ctrl, KeyMap.y], hotkeyDelay, delay); }
-    async save(hotkeyDelay = this.defaultHotkeyDelay, delay = this.defaultDelay) { return this.pressHotkey([KeyMap.ctrl, KeyMap.s], hotkeyDelay, delay); }
-    async find(hotkeyDelay = this.defaultHotkeyDelay, delay = this.defaultDelay) { return this.pressHotkey([KeyMap.ctrl, KeyMap.f], hotkeyDelay, delay); }
-    async replace(hotkeyDelay = this.defaultHotkeyDelay, delay = this.defaultDelay) { return this.pressHotkey([KeyMap.ctrl, KeyMap.h], hotkeyDelay, delay); }
+    async copy(duration, delay) { return this.pressHotkey(SHORTCUTS.copy, duration, delay); }
+    async paste(duration, delay) { return this.pressHotkey(SHORTCUTS.paste, duration, delay); }
+    async cut(duration, delay) { return this.pressHotkey(SHORTCUTS.cut, duration, delay); }
+    async selectAll(duration, delay) { return this.pressHotkey(SHORTCUTS.selectAll, duration, delay); }
+    async undo(duration, delay) { return this.pressHotkey(SHORTCUTS.undo, duration, delay); }
+    async redo(duration, delay) { return this.pressHotkey(SHORTCUTS.redo, duration, delay); }
+    async save(duration, delay) { return this.pressHotkey(SHORTCUTS.save, duration, delay); }
+    async find(duration, delay) { return this.pressHotkey(SHORTCUTS.find, duration, delay); }
+    async replace(duration, delay) { return this.pressHotkey(SHORTCUTS.replace, duration, delay); }
 
-    // Navigation shortcuts
-    async altTab(hotkeyDelay = this.defaultHotkeyDelay, delay = this.defaultDelay) { return this.pressHotkey([KeyMap.alt, KeyMap.tab], hotkeyDelay, delay); }
-    async altF4(hotkeyDelay = this.defaultHotkeyDelay, delay = this.defaultDelay) { return this.pressHotkey([KeyMap.alt, KeyMap.f4], hotkeyDelay, delay); }
-    async winKey(hotkeyDelay = this.defaultHotkeyDelay, delay = this.defaultDelay) { return this.pressKey('lwin', hotkeyDelay, delay); }
-    async taskManager(hotkeyDelay = this.defaultHotkeyDelay, delay = this.defaultDelay) { return this.pressHotkey([KeyMap.ctrl, KeyMap.shift, KeyMap.escape], hotkeyDelay, delay); }
-
-    // macOS specific shortcuts
-    async cmdCopy(hotkeyDelay = this.defaultHotkeyDelay, delay = this.defaultDelay) { return this.pressHotkey([KeyMap.cmd, KeyMap.c], hotkeyDelay, delay); }
-    async cmdPaste(hotkeyDelay = this.defaultHotkeyDelay, delay = this.defaultDelay) { return this.pressHotkey([KeyMap.cmd, KeyMap.v], hotkeyDelay, delay); }
-    async cmdCut(hotkeyDelay = this.defaultHotkeyDelay, delay = this.defaultDelay) { return this.pressHotkey([KeyMap.cmd, KeyMap.x], hotkeyDelay, delay); }
-    async cmdSave(hotkeyDelay = this.defaultHotkeyDelay, delay = this.defaultDelay) { return this.pressHotkey([KeyMap.cmd, KeyMap.s], hotkeyDelay, delay); }
-    async cmdTab(hotkeyDelay = this.defaultHotkeyDelay, delay = this.defaultDelay) { return this.pressHotkey([KeyMap.cmd, KeyMap.tab], hotkeyDelay, delay); }
-
-    // Arrow keys
-    async arrowUp(times = 1, interval = this.defaultInterval, delay = this.defaultDelay) {
-        return this.repeatKey(KeyMap.up, times, interval, delay);
-    }
-    async arrowDown(times = 1, interval = this.defaultInterval, delay = this.defaultDelay) {
-        return this.repeatKey(KeyMap.down, times, interval, delay);
-    }
-    async arrowLeft(times = 1, interval = this.defaultInterval, delay = this.defaultDelay) {
-        return this.repeatKey(KeyMap.left, times, interval, delay);
-    }
-    async arrowRight(times = 1, interval = this.defaultInterval, delay = this.defaultDelay) {
-        return this.repeatKey(KeyMap.right, times, interval, delay);
-    }
-
-    // Special keys
-    async tab(times = 1, interval = this.defaultInterval, delay = this.defaultDelay) {
-        return this.repeatKey(KeyMap.tab, times, interval, delay);
-    }
-    async space(times = 1, interval = this.defaultInterval, delay = this.defaultDelay) {
-        return this.repeatKey(KeyMap.space, times, interval, delay);
-    }
-    async backspace(times = 1, interval = this.defaultInterval, delay = this.defaultDelay) {
-        return this.repeatKey(KeyMap.backspace, times, interval, delay);
-    }
-    async delete(times = 1, interval = this.defaultInterval, delay = this.defaultDelay) {
-        return this.repeatKey(KeyMap.delete, times, interval, delay);
-    }
-
-    /**
-     * Cleanup function
-     */
+    /** Releases native resources. Safe to call more than once. */
     cleanup() {
-        if (Binary.Cleanup) {
-            Binary.Cleanup();
-        }
+        this._len = 0;
+        this._texts.length = 0;
+        Binary.Cleanup();
     }
 }
 
 class Kimacro {
-    constructor(sequence = []) {
-        this.ki = new Kimetra();
-        this.sequence = sequence;
+    constructor(options) {
+        this.ki = new Kimetra(options);
+        this.sequence = [];
     }
 
     add(action) {
+        // Drop unset fields so a macro survives a JSON round trip unchanged.
+        for (const field of Object.keys(action)) {
+            if (action[field] === undefined) delete action[field];
+        }
         this.sequence.push(action);
         return this;
-    }
-
-    async exec() {
-        const result = await this.ki.executeSequence(this.sequence);
-        this.cleanup();
-        return result;
     }
 
     pressKey(key, duration, delay) {
         return this.add({ type: 'key', key, duration, delay });
     }
 
-    typeText(text, delay) {
-        return this.add({ type: 'type', text, delay });
+    pressKeys(keys, interval, delay) {
+        return this.add({ type: 'keys', keys, interval, delay });
     }
 
     pressHotkey(keys, duration, delay) {
         return this.add({ type: 'hotkey', keys, duration, delay });
     }
 
+    repeatKey(key, times, interval, delay) {
+        return this.add({ type: 'repeat', key, times, interval, delay });
+    }
+
+    typeText(text, delay) {
+        return this.add({ type: 'text', text, delay });
+    }
+
     wait(duration) {
         return this.add({ type: 'wait', duration });
     }
 
+    /** Runs the macro. The sequence is kept, so a macro can be replayed. */
+    async exec() {
+        return this.ki.executeSequence(this.sequence);
+    }
+
     toJSON() {
-        return this.sequence
+        return this.sequence.slice();
     }
 
     fromJSON(sequence) {
-        if (!Array.isArray(sequence) || !sequence.length) {
-            throw new Error("The argument must be a valid array of action objects.")
+        if (!Array.isArray(sequence)) {
+            throw new Error('fromJSON expects an array of action objects.');
         }
-        this.sequence = sequence || [];
+        this.sequence = sequence.slice();
+        return this;
+    }
+
+    clear() {
+        this.sequence.length = 0;
         return this;
     }
 
     cleanup() {
-        this.sequence = [];
         this.ki.cleanup();
     }
 }
 
-// Quick actions
-const quickActions = {
-    async pressKey(...args) {
-        const ki = new Kimetra();
-        await ki.pressKey(...args);
-        api.cleanup();
-    },
-
-    async pressHotkey(...args) {
-        const ki = new Kimetra();
-        await ki.pressHotkey(...args);
-        api.cleanup();
-    },
-
-    async typeText(...args) {
-        const ki = new Kimetra();
-        await ki.typeText(...args);
-        api.cleanup();
-    },
-
-    async copy(delay) {
-        const ki = new Kimetra();
-        await ki.copy(delay);
-        api.cleanup();
-    },
-
-    async paste(delay) {
-        const ki = new Kimetra();
-        await ki.paste(delay);
-        api.cleanup();
-    },
-
-    async altTab(delay) {
-        const ki = new Kimetra();
-        await ki.altTab(delay);
-        api.cleanup();
-    },
-
-    copyPaste: async (delay = 100) => {
-        const ki = new Kimetra();
-        await ki.copy();
-        await ki.sleep(delay);
-        await ki.paste();
-        api.cleanup();
-    },
-
-    selectAllCopy: async () => {
-        const ki = new Kimetra();
-        await ki.selectAll();
-        await ki.copy();
-        api.cleanup();
-    },
-
-    selectAllPaste: async () => {
-        const ki = new Kimetra();
-        await ki.selectAll();
-        await ki.copy();
-        api.cleanup();
-    }
-};
-
-// Factory functions
-
-/**
- * Creates a new Kimetra instance
- * @param {Object} options
- * @param {number} [delay=0] - Initial delay before starting actions (μs)
- * @param {number} [interval=700] - Time between repeated actions (μs)
- * @param {number} [duration=700] - How long a single key press is held (μs)
- * @param {number} [hotkeyDelay=1500] - Delay specifically for multi-key combinations (μs)
- */
-function createKimetra(options = {
-    delay: 0,
-    interval: 700,
-    duration: 700,
-    hotkeyDelay: 1500
-}) {
+function createKimetra(options) {
     return new Kimetra(options);
 }
 
-function createKimacro(api, sequence = []) {
-    return new Kimacro(api, sequence);
+function createKimacro(options) {
+    return new Kimacro(options);
 }
 
-// Exports
 module.exports = {
-    Key: KeyMap,
-    Kimetra,
-    Kimacro,
-    createKimetra,
-    createKimacro,
-    quickActions,
-}
+    Kimetra: createKimetra,
+    Kimacro: createKimacro,
+    Key
+};

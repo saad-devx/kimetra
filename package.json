@@ -4,10 +4,14 @@
     "description": "A low level and light weight cross-platform keyboard automation library using native OS APIs",
     "main": "./index.cjs",
     "module": "./index.mjs",
+    "types": "./index.d.ts",
     "gypfile": false,
     "exports": {
-        "require": "./index.cjs",
-        "import": "./index.mjs"
+        ".": {
+            "types": "./index.d.ts",
+            "import": "./index.mjs",
+            "require": "./index.cjs"
+        }
     },
     "author": {
         "name": "Saad",
@@ -16,7 +20,6 @@
     },
     "scripts": {
         "test": "node scripts/test.js",
-        "example": "node examples/basic-example.js",
         "prepack": "npm test",
         "postinstall": "node scripts/post-install.js"
     },
@@ -37,9 +40,9 @@
         "input",
         "simulation",
         "macro",
-        "x11",
+        "uinput",
         "win32",
-        "carbon"
+        "coregraphics"
     ],
     "license": "MIT",
     "repository": {
@@ -51,7 +54,7 @@
     },
     "homepage": "https://github.com/saad-devx/kimetra#readme",
     "engines": {
-        "node": ">=12.0.0"
+        "node": ">=16.0.0"
     },
     "os": [
         "win32",
@@ -61,6 +64,7 @@
     "files": [
         "index.cjs",
         "index.mjs",
+        "index.d.ts",
         "src/bin",
         "src/core",
         "src/kimetra.js",

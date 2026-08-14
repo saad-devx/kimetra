@@ -5,28 +5,28 @@
       "sources": [],
       "include_dirs": ["<!@(node -p \"require('node-addon-api').include\")"],
       "dependencies": ["<!(node -p \"require('node-addon-api').gyp\")"],
-      "defines": ["NAPI_DISABLE_CPP_EXCEPTIONS"],
+      "defines": ["NAPI_DISABLE_CPP_EXCEPTIONS", "NAPI_VERSION=8"],
       "conditions": [
         ["OS=='win'", {
           "sources": ["src/cpp/win32-imetra.cpp"],
           "msvs_settings": {
             "VCCLCompilerTool": {
-              "Optimization": "2",                 
+              "Optimization": "2",
               "EnableFunctionLevelLinking": "true",
-              "FavorSizeOrSpeed": "1",             
-              "WholeProgramOptimization": "true",  
+              "FavorSizeOrSpeed": "1",
+              "WholeProgramOptimization": "true",
               "AdditionalOptions": [
-                "/O2",       
-                "/GL",       
+                "/O2",
+                "/GL",
                 "/std:c++20",
-                "/Gw",       
-                "/Gy"        
+                "/Gw",
+                "/Gy"
               ]
             },
             "LINK": {
               "LinkTimeCodeGeneration": "true",
-              "OptimizeReferences": "2",       
-              "EnableCOMDATFolding": "2"       
+              "OptimizeReferences": "2",
+              "EnableCOMDATFolding": "2"
             }
           },
           "libraries": ["user32.lib"]
@@ -37,33 +37,32 @@
           "xcode_settings": {
             "OTHER_CPLUSPLUSFLAGS": [
               "-std=c++20",
-              "-O3",                
-              "-flto",              
-              "-fvisibility=hidden" 
+              "-O3",
+              "-flto",
+              "-fvisibility=hidden"
             ]
           },
           "libraries": [
             "-framework CoreFoundation",
             "-framework CoreGraphics",
-            "-framework Carbon"
+            "-framework ApplicationServices"
           ]
         }],
 
         ["OS=='linux'", {
           "sources": ["src/cpp/linux-imetra.cpp"],
-          "cflags": [
+          "cflags_cc": [
             "-std=c++20",
-            "-O3",                
-            "-flto",              
-            "-fvisibility=hidden" 
+            "-O3",
+            "-flto",
+            "-fvisibility=hidden"
           ],
           "ldflags": [
             "-flto",
             "-Wl,--strip-all",
             "-Wl,--as-needed",
             "-s"
-          ],
-          "libraries": ["-lX11", "-lXtst"]
+          ]
         }]
       ]
     }
