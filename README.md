@@ -319,6 +319,27 @@ so `typeText('a\nb')` behaves the same everywhere.
 Anything else, including `linux-arm64` and Alpine, fails at require time with a
 message naming your platform.
 
+## Building from source
+
+The addon binaries are not committed to this repository. They are compiled from
+`src/cpp` by the GitHub Actions workflow and injected into the package at publish
+time, so nothing ships that was not built from this source in a public,
+auditable run. Every release is published with
+[npm provenance](https://docs.npmjs.com/generating-provenance-statements), which
+cryptographically ties the tarball to the exact commit and workflow that produced
+it. You can verify it with `npm audit signatures`.
+
+To build them yourself you need Python 3 and a C++ toolchain (MSVC on Windows,
+Xcode command line tools on macOS, `build-essential` on Linux):
+
+```bash
+npm install node-addon-api && npx node-gyp configure build
+```
+
+That produces `build/Release/keyboard.node`. Copy it into `src/bin` under the
+name for your platform and architecture, for example `src/bin/win32x64.node` or
+`src/bin/linuxx64.node`, then run `npm test`.
+
 ## License
 
 MIT © Saad

@@ -26,16 +26,25 @@ namespace kimetra
     LARGE_INTEGER g_freq = {0};
     HANDLE g_timer = nullptr;
 
+    HANDLE EnsureTimer() noexcept
+    {
+        if (!g_timer)
+        {
+            g_timer = CreateWaitableTimerExW(nullptr, nullptr,
+                                             CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+                                             TIMER_ALL_ACCESS);
+            if (!g_timer)
+            {
+                g_timer = CreateWaitableTimerExW(nullptr, nullptr, 0, TIMER_ALL_ACCESS);
+            }
+        }
+        return g_timer;
+    }
+
     void InitTiming() noexcept
     {
         QueryPerformanceFrequency(&g_freq);
-        g_timer = CreateWaitableTimerExW(nullptr, nullptr,
-                                         CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
-                                         TIMER_ALL_ACCESS);
-        if (!g_timer)
-        {
-            g_timer = CreateWaitableTimerExW(nullptr, nullptr, 0, TIMER_ALL_ACCESS);
-        }
+        EnsureTimer();
     }
 
     // Keys that must carry KEYEVENTF_EXTENDEDKEY for apps reading raw input.
@@ -77,13 +86,14 @@ namespace kimetra
         QueryPerformanceCounter(&start);
         LONGLONG deadline = start.QuadPart + (g_freq.QuadPart * micros) / 1000000LL;
 
-        if (micros > SPIN_MARGIN_US && g_timer)
+        if (micros > SPIN_MARGIN_US)
         {
+            HANDLE timer = EnsureTimer();
             LARGE_INTEGER due;
             due.QuadPart = -(static_cast<LONGLONG>(micros - SPIN_MARGIN_US) * 10);
-            if (SetWaitableTimer(g_timer, &due, 0, nullptr, nullptr, FALSE))
+            if (timer && SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE))
             {
-                WaitForSingleObject(g_timer, INFINITE);
+                WaitForSingleObject(timer, INFINITE);
             }
         }
 

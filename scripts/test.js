@@ -313,6 +313,28 @@ test('cleanup is callable more than once', () => {
     ki.cleanup();
 });
 
+test('sleep does not busy-wait, including after cleanup', () => {
+    const ki = Kimetra();
+
+    // Fraction of a core burned while sleeping. The coarse wait should block, so
+    // only the 1.2ms spin margin costs CPU. A full busy-wait would report ~1.0.
+    const coreUsage = () => {
+        const cpuStart = process.cpuUsage();
+        const wallStart = process.hrtime.bigint();
+        ki.core.Sleep(100000);
+        const wall = Number(process.hrtime.bigint() - wallStart) / 1000;
+        const cpu = process.cpuUsage(cpuStart);
+        return (cpu.user + cpu.system) / wall;
+    };
+
+    const before = coreUsage();
+    ki.cleanup();
+    const after = coreUsage();
+
+    assert.ok(before < 0.5, `sleep burned ${(before * 100).toFixed(0)}% of a core`);
+    assert.ok(after < 0.5, `sleep burned ${(after * 100).toFixed(0)}% of a core after cleanup()`);
+});
+
 test('sleep never returns early and reads the right unit', () => {
     const ki = Kimetra();
     const measured = [];
