@@ -1,6 +1,6 @@
 {
     "name": "kimetra",
-    "version": "2.0.0",
+    "version": "2.0.1",
     "description": "A low level and light weight cross-platform keyboard automation library using native OS APIs",
     "main": "./index.cjs",
     "module": "./index.mjs",
