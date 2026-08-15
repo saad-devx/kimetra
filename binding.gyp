@@ -18,7 +18,6 @@
               "AdditionalOptions": [
                 "/O2",
                 "/GL",
-                "/std:c++20",
                 "/Gw",
                 "/Gy"
               ]
@@ -36,7 +35,7 @@
           "sources": ["src/cpp/darwin-imetra.cpp"],
           "xcode_settings": {
             "OTHER_CPLUSPLUSFLAGS": [
-              "-std=c++20",
+              "-std=c++17",
               "-O3",
               "-flto",
               "-fvisibility=hidden"
@@ -52,7 +51,7 @@
         ["OS=='linux'", {
           "sources": ["src/cpp/linux-imetra.cpp"],
           "cflags_cc": [
-            "-std=c++20",
+            "-std=c++17",
             "-O3",
             "-flto",
             "-fvisibility=hidden"

@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace
+namespace kimetra
 {
     enum Op
     {
@@ -289,14 +289,14 @@ namespace
 
 static Napi::Object Init(Napi::Env env, Napi::Object exports)
 {
-    exports.Set("KeyDown", Napi::Function::New(env, KeyDown));
-    exports.Set("KeyUp", Napi::Function::New(env, KeyUp));
-    exports.Set("SendString", Napi::Function::New(env, SendString));
-    exports.Set("Sleep", Napi::Function::New(env, Sleep));
-    exports.Set("Run", Napi::Function::New(env, Run));
-    exports.Set("Cleanup", Napi::Function::New(env, Cleanup));
+    exports.Set("KeyDown", Napi::Function::New(env, kimetra::KeyDown));
+    exports.Set("KeyUp", Napi::Function::New(env, kimetra::KeyUp));
+    exports.Set("SendString", Napi::Function::New(env, kimetra::SendString));
+    exports.Set("Sleep", Napi::Function::New(env, kimetra::Sleep));
+    exports.Set("Run", Napi::Function::New(env, kimetra::Run));
+    exports.Set("Cleanup", Napi::Function::New(env, kimetra::Cleanup));
 
-    env.AddCleanupHook([]() { g_flags = 0; });
+    env.AddCleanupHook([]() { kimetra::g_flags = 0; });
 
     return exports;
 }

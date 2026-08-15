@@ -7,7 +7,9 @@
 #define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
 #endif
 
-namespace
+// Named rather than anonymous so that `Sleep` cannot collide with the global
+// Sleep() declared by windows.h when Init refers to it.
+namespace kimetra
 {
     enum Op
     {
@@ -238,16 +240,16 @@ namespace
 
 static Napi::Object Init(Napi::Env env, Napi::Object exports)
 {
-    InitTiming();
+    kimetra::InitTiming();
 
-    exports.Set("KeyDown", Napi::Function::New(env, KeyDown));
-    exports.Set("KeyUp", Napi::Function::New(env, KeyUp));
-    exports.Set("SendString", Napi::Function::New(env, SendString));
-    exports.Set("Sleep", Napi::Function::New(env, Sleep));
-    exports.Set("Run", Napi::Function::New(env, Run));
-    exports.Set("Cleanup", Napi::Function::New(env, Cleanup));
+    exports.Set("KeyDown", Napi::Function::New(env, kimetra::KeyDown));
+    exports.Set("KeyUp", Napi::Function::New(env, kimetra::KeyUp));
+    exports.Set("SendString", Napi::Function::New(env, kimetra::SendString));
+    exports.Set("Sleep", Napi::Function::New(env, kimetra::Sleep));
+    exports.Set("Run", Napi::Function::New(env, kimetra::Run));
+    exports.Set("Cleanup", Napi::Function::New(env, kimetra::Cleanup));
 
-    env.AddCleanupHook([]() { Release(); });
+    env.AddCleanupHook([]() { kimetra::Release(); });
 
     return exports;
 }

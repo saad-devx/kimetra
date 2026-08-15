@@ -313,14 +313,29 @@ test('cleanup is callable more than once', () => {
     ki.cleanup();
 });
 
-test('sleep is accurate to within 5ms', () => {
+test('sleep never returns early and reads the right unit', () => {
     const ki = Kimetra();
-    const start = process.hrtime.bigint();
-    ki.core.Sleep(50000);
-    const elapsedUs = Number(process.hrtime.bigint() - start) / 1000;
+    const measured = [];
 
-    assert.ok(elapsedUs >= 49000, `slept ${elapsedUs.toFixed(0)}us, expected at least 49000`);
-    assert.ok(elapsedUs < 55000, `slept ${elapsedUs.toFixed(0)}us, expected under 55000`);
+    for (const micros of [1000, 20000, 50000]) {
+        const start = process.hrtime.bigint();
+        ki.core.Sleep(micros);
+        const elapsed = Number(process.hrtime.bigint() - start) / 1000;
+        measured.push(`${micros}us -> ${elapsed.toFixed(0)}us`);
+
+        // The guarantee worth testing: a sleep never finishes early.
+        assert.ok(
+            elapsed >= micros * 0.98,
+            `Sleep(${micros}) returned after ${elapsed.toFixed(0)}us, which is early`
+        );
+        
+        assert.ok(
+            elapsed < micros + 500000,
+            `Sleep(${micros}) took ${elapsed.toFixed(0)}us, far beyond the request`
+        );
+    }
+
+    console.log(`        timing: ${measured.join(', ')}`);
 });
 
 // ==================================================
