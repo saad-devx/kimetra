@@ -6,7 +6,10 @@
  */
 
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
+const { execFileSync } = require('child_process');
 const { pathToFileURL } = require('url');
 
 const { Kimetra, Kimacro, Key } = require('../index.cjs');
@@ -95,12 +98,13 @@ test('Key is frozen', () => {
 // ==================================================
 
 test('defaults are microseconds', () => {
-    const ki = Kimetra();
-    assert.strictEqual(ki.unit, 'microsecond');
-    assert.strictEqual(ki.delay, 0);
-    assert.strictEqual(ki.interval, 700);
-    assert.strictEqual(ki.duration, 700);
-    assert.strictEqual(ki.hotkeyDelay, 1500);
+    for (const ki of [Kimetra(), Kimetra(null)]) {
+        assert.strictEqual(ki.unit, 'microsecond');
+        assert.strictEqual(ki.delay, 0);
+        assert.strictEqual(ki.interval, 700);
+        assert.strictEqual(ki.duration, 700);
+        assert.strictEqual(ki.hotkeyDelay, 1500);
+    }
 });
 
 test('millisecond unit scales supplied values but not defaults', () => {
@@ -131,6 +135,79 @@ test('a raw code from Key passes through', async () => {
     const taken = capture(ki);
     await ki.pressKey(Key.enter);
     assert.strictEqual(taken().ops[0][1], Key.enter);
+});
+
+// ==================================================
+// Input validation
+// ==================================================
+
+test('a raw key code outside the valid range is rejected', async () => {
+    const ki = Kimetra();
+    await assert.rejects(() => ki.pressKey(NaN), /Invalid key code NaN/);
+    await assert.rejects(() => ki.pressKey(-1), /Invalid key code -1/);
+    await assert.rejects(() => ki.pressKey(1.5), /Invalid key code 1.5/);
+});
+
+test('arguments that must be arrays are checked', async () => {
+    const ki = Kimetra();
+    await assert.rejects(() => ki.pressHotkey('ctrl'), /pressHotkey needs an array of keys/);
+    await assert.rejects(() => ki.pressKeys('abc'), /pressKeys needs an array of keys/);
+    await assert.rejects(() => ki.executeSequence('key enter'), /needs an array of actions/);
+});
+
+test('repeatKey takes a whole count, and zero presses nothing', async () => {
+    const ki = Kimetra();
+    const taken = capture(ki);
+
+    await assert.rejects(() => ki.repeatKey('a'), /repeat needs a whole number of times/);
+    await assert.rejects(() => ki.repeatKey('a', 2.5), /repeat needs a whole number of times/);
+    await assert.rejects(() => ki.repeatKey('a', -1), /repeat needs a whole number of times/);
+
+    await ki.repeatKey('a', 0);
+    assert.deepStrictEqual(taken().ops, []);
+});
+
+test('typeText requires a string', async () => {
+    const ki = Kimetra();
+    await assert.rejects(() => ki.typeText(undefined), /text must be a string, received undefined/);
+    await assert.rejects(() => ki.typeText(42), /text must be a string, received 42/);
+    await assert.rejects(() => ki.typeText(null), /text must be a string, received null/);
+});
+
+test('durations must be finite, non-negative and inside the int32 range', async () => {
+    const ki = Kimetra();
+    await assert.rejects(() => ki.pressKey('a', -5), /duration must be a non-negative number/);
+    await assert.rejects(() => ki.pressKey('a', '100'), /duration must be a non-negative number/);
+    await assert.rejects(() => ki.pressKey('a', NaN), /duration must be a non-negative number/);
+    assert.throws(() => Kimetra({ interval: -1 }), /interval must be a non-negative number/);
+
+    await assert.rejects(
+        () => ki.executeSequence([{ type: 'wait', duration: 3e9 }]),
+        /wait duration of 3000000000 exceeds the maximum of 2147483647 microseconds/
+    );
+
+    const ms = Kimetra({ unit: 'millisecond' });
+    await assert.rejects(() => ms.sleep(3e6), /exceeds the maximum of 2147483 milliseconds/);
+});
+
+test('wait and sleep require a duration', async () => {
+    const ki = Kimetra();
+    await assert.rejects(
+        () => ki.executeSequence([{ type: 'wait' }]),
+        /A "wait" action needs a duration/
+    );
+    await assert.rejects(() => ki.sleep(), /sleep needs a duration/);
+});
+
+test('a rejected call leaves no partial batch behind', async () => {
+    const ki = Kimetra({ delay: 500 });
+    const taken = capture(ki);
+
+    await assert.rejects(() => ki.keyDown('entre'), /Unknown key "entre"/);
+    assert.strictEqual(ki._len, 0);
+
+    await ki.keyDown('a');
+    assert.deepStrictEqual(taken().ops, [[OP_SLEEP, 500], [OP_DOWN, Key.a]]);
 });
 
 // ==================================================
@@ -286,6 +363,16 @@ test('a macro is replayable and survives exec', async () => {
     assert.strictEqual(macro.sequence.length, 3);
 });
 
+test('add stores a copy of the action it is given', () => {
+    const action = { type: 'key', key: 'a', duration: undefined };
+    const macro = Kimacro().add(action);
+
+    assert.ok('duration' in action, 'the caller\'s object must not be modified');
+
+    action.key = 'b';
+    assert.strictEqual(macro.toJSON()[0].key, 'a');
+});
+
 test('a macro round-trips through JSON', () => {
     const original = Kimacro().pressHotkey(['ctrl', 's']).wait(500);
     const restored = Kimacro().fromJSON(JSON.parse(JSON.stringify(original.toJSON())));
@@ -358,6 +445,95 @@ test('sleep never returns early and reads the right unit', () => {
     }
 
     console.log(`        timing: ${measured.join(', ')}`);
+});
+
+// ==================================================
+// CLI
+// ==================================================
+// The CLI is driven through --dry-run, so these tests send no key events either.
+
+const CLI = path.resolve(__dirname, '../bin/cli.js');
+
+function cli(args) {
+    try {
+        const out = execFileSync(process.execPath, [CLI, ...args], {
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'pipe']
+        });
+        return { code: 0, out };
+    } catch (err) {
+        return { code: err.status, out: (err.stdout || '') + (err.stderr || '') };
+    }
+}
+
+test('no command word is also a key name', () => {
+    // A chain reads tokens until the next command word, so a command that was
+    // also a key name would make `keys a <name> b` ambiguous.
+    for (const word of ['key', 'keys', 'hotkey', 'repeat', 'type', 'wait', 'run', 'list']) {
+        assert.strictEqual(Key[word], undefined, `"${word}" is both a command and a key name`);
+    }
+});
+
+test('a chain compiles into one action list', () => {
+    const { code, out } = cli(['--dry-run', 'hotkey', 'alt+tab', 'wait', '200', 'type', 'hi', 'key', 'enter']);
+    assert.strictEqual(code, 0);
+    assert.deepStrictEqual(JSON.parse(out), [
+        { type: 'hotkey', keys: ['alt', 'tab'] },
+        { type: 'wait', duration: 200000 },
+        { type: 'text', text: 'hi' },
+        { type: 'key', key: 'enter' }
+    ]);
+});
+
+test('a variadic keys command stops at the next command', () => {
+    const { out } = cli(['--dry-run', 'keys', 'a', 'up', 'b', 'wait', '5']);
+    assert.deepStrictEqual(JSON.parse(out), [
+        { type: 'keys', keys: ['a', 'up', 'b'] },
+        { type: 'wait', duration: 5000 }
+    ]);
+});
+
+test('CLI numbers reach the action list as microseconds', () => {
+    assert.strictEqual(JSON.parse(cli(['--dry-run', 'wait', '500']).out)[0].duration, 500000);
+    assert.strictEqual(JSON.parse(cli(['--dry-run', 'wait', '500', '-u', 'us']).out)[0].duration, 500);
+});
+
+test('what the CLI emits is what the library accepts', async () => {
+    const { out } = cli(['--dry-run', 'keys', 'a', 'b', 'wait', '5', 'repeat', 'down', '3']);
+    const ki = Kimetra();
+    const taken = capture(ki);
+
+    await ki.executeSequence(JSON.parse(out));
+    assert.ok(taken().ops.length > 0);
+});
+
+test('a macro saved by Kimacro loads in the CLI unchanged', () => {
+    const file = path.join(os.tmpdir(), 'kimetra-cli-test.json');
+    const saved = Kimacro().pressKey('enter').typeText('hi').wait(1000000).toJSON();
+    fs.writeFileSync(file, JSON.stringify(saved));
+
+    try {
+        const { code, out } = cli(['--dry-run', 'run', file]);
+        assert.strictEqual(code, 0);
+        assert.deepStrictEqual(JSON.parse(out), saved);
+    } finally {
+        fs.unlinkSync(file);
+    }
+});
+
+test('usage mistakes exit 2, runtime failures exit 1', () => {
+    for (const args of [['nope'], ['key'], ['hotkey', 'ctrl'], ['--unit', 'seconds'], ['wait', '-5']]) {
+        assert.strictEqual(cli(args).code, 2, `expected exit 2 for: ${args.join(' ')}`);
+    }
+    assert.strictEqual(cli(['key', 'entre']).code, 1, 'an unknown key is a runtime failure');
+});
+
+test('help and version do not need the native addon', () => {
+    for (const flag of ['--help', '--version']) {
+        const { code, out } = cli([flag]);
+        assert.strictEqual(code, 0);
+        assert.ok(out.trim().length > 0, `${flag} printed nothing`);
+    }
 });
 
 // ==================================================

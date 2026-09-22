@@ -14,6 +14,10 @@ const OP_TEXT = 3;
 // register a modifier before the key that follows it.
 const KEY_GAP = 1000;
 
+// Batch arguments are stored in an Int32Array and read back as a C int.
+const MAX_MICROS = 2147483647;
+const MAX_KEYCODE = 65535;
+
 const TARGETS = 'win32-x64, win32-ia32, darwin-x64, darwin-arm64, linux-x64, linux-ia32';
 
 const REJECTED = OS === 'win32'
@@ -25,6 +29,7 @@ function loadKeymap() {
     try {
         return require('./core/' + OS + '.js');
     } catch (err) {
+        if (err && err.code !== 'MODULE_NOT_FOUND') throw err;
         throw new Error(`Kimetra does not support "${OS}". Supported platforms: win32, darwin, linux.`);
     }
 }
@@ -43,9 +48,21 @@ function loadBinary() {
 const Key = Object.freeze(loadKeymap());
 const Binary = loadBinary();
 
-/** Resolves a key name to its platform code. Numbers pass through unchanged. */
+/** Formats a rejected value for an error message. */
+function describe(value) {
+    return typeof value === 'string' ? JSON.stringify(value) : String(value);
+}
+
+/** Resolves a key name to its platform code. Raw codes pass through unchanged. */
 function code(key) {
-    if (typeof key === 'number') return key;
+    if (typeof key === 'number') {
+        if (!Number.isInteger(key) || key < 0 || key > MAX_KEYCODE) {
+            throw new RangeError(
+                `Invalid key code ${describe(key)}. Expected a whole number from 0 to ${MAX_KEYCODE}.`
+            );
+        }
+        return key;
+    }
 
     const resolved = Key[key];
     if (resolved === undefined) {
@@ -54,7 +71,11 @@ function code(key) {
     return resolved;
 }
 
-function codes(keys) {
+function codes(keys, name) {
+    if (!Array.isArray(keys)) {
+        throw new TypeError(`${name} needs an array of keys, received ${describe(keys)}.`);
+    }
+
     const out = new Array(keys.length);
     for (let i = 0; i < keys.length; i++) {
         out[i] = code(keys[i]);
@@ -79,12 +100,13 @@ const SHORTCUTS = {
 };
 
 for (const name of Object.keys(SHORTCUTS)) {
-    SHORTCUTS[name] = codes(SHORTCUTS[name]);
+    SHORTCUTS[name] = codes(SHORTCUTS[name], name);
 }
 
 class Kimetra {
-    constructor(options = {}) {
-        const scale = options.unit === 'millisecond' ? 1000 : 1;
+    constructor(options) {
+        const opts = options || {};
+        const scale = opts.unit === 'millisecond' ? 1000 : 1;
 
         this.os = OS;
         this.arch = ARCH;
@@ -93,10 +115,10 @@ class Kimetra {
 
         // Defaults are stored in microseconds; only caller supplied values are scaled.
         this._scale = scale;
-        this.delay = options.delay !== undefined ? options.delay * scale : 0;
-        this.interval = options.interval !== undefined ? options.interval * scale : 700;
-        this.duration = options.duration !== undefined ? options.duration * scale : 700;
-        this.hotkeyDelay = options.hotkeyDelay !== undefined ? options.hotkeyDelay * scale : 1500;
+        this.delay = this._us(opts.delay, 0, 'delay');
+        this.interval = this._us(opts.interval, 700, 'interval');
+        this.duration = this._us(opts.duration, 700, 'duration');
+        this.hotkeyDelay = this._us(opts.hotkeyDelay, 1500, 'hotkeyDelay');
 
         this._ops = new Int32Array(64);
         this._len = 0;
@@ -106,9 +128,24 @@ class Kimetra {
     // ==================================================
     // BATCH BUILDING
     // ==================================================
+    // Builders validate before they push: an op left behind by a call that then
+    // throws would replay on the next one.
 
-    _us(value, fallback) {
-        return value === undefined ? fallback : value * this._scale;
+    _us(value, fallback, name) {
+        if (value === undefined) return fallback;
+
+        if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+            throw new TypeError(`${name} must be a non-negative number, received ${describe(value)}.`);
+        }
+
+        const micros = value * this._scale;
+        if (micros > MAX_MICROS) {
+            throw new RangeError(
+                `${name} of ${value} exceeds the maximum of ` +
+                `${Math.floor(MAX_MICROS / this._scale)} ${this.unit}s.`
+            );
+        }
+        return micros;
     }
 
     _push(op, arg) {
@@ -155,6 +192,10 @@ class Kimetra {
     }
 
     _buildRepeat(keyCode, times, interval, delay) {
+        if (!Number.isInteger(times) || times < 0) {
+            throw new TypeError(`repeat needs a whole number of times, received ${describe(times)}.`);
+        }
+
         if (delay > 0) this._push(OP_SLEEP, delay);
         for (let i = 0; i < times; i++) {
             if (i > 0 && interval > 0) this._push(OP_SLEEP, interval);
@@ -165,8 +206,12 @@ class Kimetra {
     }
 
     _buildText(text, delay) {
+        if (typeof text !== 'string') {
+            throw new TypeError(`text must be a string, received ${describe(text)}.`);
+        }
+
         if (delay > 0) this._push(OP_SLEEP, delay);
-        this._texts.push(String(text));
+        this._texts.push(text);
         this._push(OP_TEXT, this._texts.length - 1);
     }
 
@@ -193,58 +238,89 @@ class Kimetra {
 
     /** Presses a key down and leaves it held. */
     async keyDown(key, delay) {
-        const wait = this._us(delay, this.delay);
+        const keyCode = code(key);
+        const wait = this._us(delay, this.delay, 'delay');
+
         if (wait > 0) this._push(OP_SLEEP, wait);
-        this._push(OP_DOWN, code(key));
+        this._push(OP_DOWN, keyCode);
         return this._run();
     }
 
     /** Releases a held key. */
     async keyUp(key, delay) {
-        const wait = this._us(delay, this.delay);
+        const keyCode = code(key);
+        const wait = this._us(delay, this.delay, 'delay');
+
         if (wait > 0) this._push(OP_SLEEP, wait);
-        this._push(OP_UP, code(key));
+        this._push(OP_UP, keyCode);
         return this._run();
     }
 
     /** Presses and releases a key, holding it down for `duration`. */
     async pressKey(key, duration, delay) {
-        this._buildKey(code(key), this._us(duration, this.duration), this._us(delay, this.delay));
+        this._buildKey(
+            code(key),
+            this._us(duration, this.duration, 'duration'),
+            this._us(delay, this.delay, 'delay')
+        );
         return this._run();
     }
 
     /** Presses several keys one after another. */
     async pressKeys(keys, interval, delay) {
-        this._buildSeries(codes(keys), this._us(interval, this.interval), this._us(delay, this.delay));
+        this._buildSeries(
+            codes(keys, 'pressKeys'),
+            this._us(interval, this.interval, 'interval'),
+            this._us(delay, this.delay, 'delay')
+        );
         return this._run();
     }
 
     /** Presses keys together as a combination, releasing them in reverse order. */
     async pressHotkey(keys, duration, delay) {
-        this._buildHotkey(codes(keys), this._us(duration, this.hotkeyDelay), this._us(delay, this.delay));
+        this._buildHotkey(
+            codes(keys, 'pressHotkey'),
+            this._us(duration, this.hotkeyDelay, 'duration'),
+            this._us(delay, this.delay, 'delay')
+        );
         return this._run();
     }
 
     /** Presses the same key `times` times. */
     async repeatKey(key, times, interval, delay) {
-        this._buildRepeat(code(key), times, this._us(interval, this.interval), this._us(delay, this.delay));
+        this._buildRepeat(
+            code(key),
+            times,
+            this._us(interval, this.interval, 'interval'),
+            this._us(delay, this.delay, 'delay')
+        );
         return this._run();
     }
 
     /** Types text. Unicode is supported on Windows and macOS. */
     async typeText(text, delay) {
-        this._buildText(text, this._us(delay, this.delay));
+        this._buildText(text, this._us(delay, this.delay, 'delay'));
         return this._run();
     }
 
     /** Blocks for `duration` with microsecond accuracy. */
     async sleep(duration) {
-        Binary.Sleep(duration * this._scale);
+        if (duration === undefined) {
+            throw new TypeError('sleep needs a duration.');
+        }
+
+        Binary.Sleep(this._us(duration, 0, 'sleep duration'));
         return true;
     }
 
     /** Compiles an entire action list into a single native call. */
     async executeSequence(actions) {
+        if (!Array.isArray(actions)) {
+            throw new TypeError(
+                `executeSequence needs an array of actions, received ${describe(actions)}.`
+            );
+        }
+
         try {
             this._compile(actions);
         } catch (err) {
@@ -263,37 +339,40 @@ class Kimetra {
                 case 'key':
                     this._buildKey(
                         code(action.key),
-                        this._us(action.duration, this.duration),
-                        this._us(action.delay, this.delay)
+                        this._us(action.duration, this.duration, 'duration'),
+                        this._us(action.delay, this.delay, 'delay')
                     );
                     break;
                 case 'keys':
                     this._buildSeries(
-                        codes(action.keys),
-                        this._us(action.interval, this.interval),
-                        this._us(action.delay, this.delay)
+                        codes(action.keys, 'a "keys" action'),
+                        this._us(action.interval, this.interval, 'interval'),
+                        this._us(action.delay, this.delay, 'delay')
                     );
                     break;
                 case 'hotkey':
                     this._buildHotkey(
-                        codes(action.keys),
-                        this._us(action.duration, this.hotkeyDelay),
-                        this._us(action.delay, this.delay)
+                        codes(action.keys, 'a "hotkey" action'),
+                        this._us(action.duration, this.hotkeyDelay, 'duration'),
+                        this._us(action.delay, this.delay, 'delay')
                     );
                     break;
                 case 'repeat':
                     this._buildRepeat(
                         code(action.key),
                         action.times,
-                        this._us(action.interval, this.interval),
-                        this._us(action.delay, this.delay)
+                        this._us(action.interval, this.interval, 'interval'),
+                        this._us(action.delay, this.delay, 'delay')
                     );
                     break;
                 case 'text':
-                    this._buildText(action.text, this._us(action.delay, this.delay));
+                    this._buildText(action.text, this._us(action.delay, this.delay, 'delay'));
                     break;
                 case 'wait':
-                    this._push(OP_SLEEP, this._us(action.duration, this.interval));
+                    if (action.duration === undefined) {
+                        throw new TypeError('A "wait" action needs a duration.');
+                    }
+                    this._push(OP_SLEEP, this._us(action.duration, 0, 'wait duration'));
                     break;
                 default:
                     throw new Error(`Unknown action type "${action.type}".`);
@@ -332,11 +411,18 @@ class Kimacro {
     }
 
     add(action) {
-        // Drop unset fields so a macro survives a JSON round trip unchanged.
-        for (const field of Object.keys(action)) {
-            if (action[field] === undefined) delete action[field];
+        if (!action || typeof action !== 'object') {
+            throw new TypeError(`add needs an action object, received ${describe(action)}.`);
         }
-        this.sequence.push(action);
+
+        // Copy without unset fields: survives a JSON round trip, and leaves the
+        // caller's object alone.
+        const copy = {};
+        for (const field of Object.keys(action)) {
+            if (action[field] !== undefined) copy[field] = action[field];
+        }
+
+        this.sequence.push(copy);
         return this;
     }
 

@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- A `kimetra` command. Commands chain by being written one after another, and a
+  whole chain compiles into a single native call. Covers `key`, `keys`,
+  `hotkey`, `repeat`, `type`, `wait`, `run` and `list`.
+- CLI numbers are milliseconds by default, with `--unit us` for parity with the
+  library. Macro files always hold microseconds, so `--dry-run` output and
+  `Kimacro().toJSON()` output are interchangeable.
+- `type -` and `run -` read stdin.
+
+### Fixed
+
+- Windows: `typeText` sent two Enter presses for a CRLF pair. Carriage returns
+  are now dropped, matching macOS and Linux.
+- `keyDown` and `keyUp` left a stray sleep in the batch when the key name was
+  invalid, which replayed on the next call.
+- A key map that failed to load for any reason other than being absent was
+  reported as an unsupported platform.
+
+### Changed
+
+Arguments that were previously coerced or ignored now throw:
+
+- Durations, delays and intervals must be finite, non-negative and within
+  2147483647 microseconds. Larger values used to wrap and skip the wait.
+- `repeatKey` requires a whole count. Zero remains a no-op.
+- `typeText` requires a string.
+- `pressKeys`, `pressHotkey` and `executeSequence` require an array.
+- Raw key codes must be whole numbers from 0 to 65535.
+- `wait` actions and `sleep()` require a duration.
+- `Kimacro.add()` stores a copy instead of modifying the caller's object.
+- `Kimetra(null)` uses the defaults instead of throwing.
+
 ## 2.0.0
 
 A correctness and simplification release. The API surface is smaller, keys are

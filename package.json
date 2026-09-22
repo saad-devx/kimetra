@@ -5,6 +5,9 @@
     "main": "./index.cjs",
     "module": "./index.mjs",
     "types": "./index.d.ts",
+    "bin": {
+        "kimetra": "./bin/cli.js"
+    },
     "gypfile": false,
     "exports": {
         ".": {
@@ -65,6 +68,7 @@
         "index.cjs",
         "index.mjs",
         "index.d.ts",
+        "bin/cli.js",
         "src/bin",
         "src/core",
         "src/kimetra.js",

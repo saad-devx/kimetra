@@ -116,10 +116,13 @@ namespace kimetra
 
         for (char16_t ch : text)
         {
+            if (ch == u'\r')
+                continue;
+
             INPUT down = {};
             down.type = INPUT_KEYBOARD;
 
-            if (ch == u'\n' || ch == u'\r' || ch == u'\t')
+            if (ch == u'\n' || ch == u'\t')
             {
                 WORD vk = (ch == u'\t') ? VK_TAB : VK_RETURN;
                 down.ki.wVk = vk;
