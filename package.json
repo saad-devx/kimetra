@@ -50,7 +50,7 @@
     "license": "MIT",
     "repository": {
         "type": "git",
-        "url": "https://github.com/saad-devx/kimetra.git"
+        "url": "git+https://github.com/saad-devx/kimetra.git"
     },
     "bugs": {
         "url": "https://github.com/saad-devx/kimetra/issues"
