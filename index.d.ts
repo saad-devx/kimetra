@@ -80,6 +80,8 @@ export interface KimetraOptions {
 }
 
 export type Action =
+    | { type: 'down'; key: KeyInput; delay?: number }
+    | { type: 'up'; key: KeyInput; delay?: number }
     | { type: 'key'; key: KeyInput; duration?: number; delay?: number }
     | { type: 'keys'; keys: KeyInput[]; interval?: number; delay?: number }
     | { type: 'hotkey'; keys: KeyInput[]; duration?: number; delay?: number }
@@ -93,11 +95,19 @@ export interface KimetraCore {
     KeyUp(keyCode: number): boolean;
     SendString(text: string): boolean;
     Sleep(microseconds: number): void;
+    /** Runs a batch of `[op, a, b]` records. `length` counts Int32 slots. */
     Run(ops: Int32Array, length: number, texts?: string[]): boolean;
     Cleanup(): void;
+    /** Batch layout the binary was built for. */
+    readonly Format: number;
 }
 
-export interface KimetraInstance {
+/** Editing shortcuts: Cmd on macOS, Ctrl elsewhere. */
+export type Shortcut =
+    | 'copy' | 'paste' | 'cut' | 'selectAll' | 'undo' | 'redo' | 'save' | 'find' | 'replace';
+
+export interface KimetraInstance
+    extends Record<Shortcut, (duration?: number, delay?: number) => Promise<boolean>> {
     readonly os: 'win32' | 'darwin' | 'linux';
     readonly arch: string;
     readonly unit: 'microsecond' | 'millisecond';
@@ -122,16 +132,6 @@ export interface KimetraInstance {
     sleep(duration: number): Promise<boolean>;
     /** Compiles an entire action list into a single native call. */
     executeSequence(actions: Action[]): Promise<boolean>;
-
-    copy(duration?: number, delay?: number): Promise<boolean>;
-    paste(duration?: number, delay?: number): Promise<boolean>;
-    cut(duration?: number, delay?: number): Promise<boolean>;
-    selectAll(duration?: number, delay?: number): Promise<boolean>;
-    undo(duration?: number, delay?: number): Promise<boolean>;
-    redo(duration?: number, delay?: number): Promise<boolean>;
-    save(duration?: number, delay?: number): Promise<boolean>;
-    find(duration?: number, delay?: number): Promise<boolean>;
-    replace(duration?: number, delay?: number): Promise<boolean>;
 
     /** Releases native resources. Safe to call more than once. */
     cleanup(): void;

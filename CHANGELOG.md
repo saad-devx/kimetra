@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `down` and `up` sequence actions, matching `keyDown` and `keyUp`.
+
+### Changed
+
+- Hotkeys no longer wait one gap after the last key-up, which saves 1 ms per
+  hotkey. Key order and the hold before release are unchanged.
+- Every method compiles through the same path as `executeSequence`. Array errors
+  now name the action type, for example `hotkey needs an array of keys`.
+- Batches use `[op, a, b]` records to make room for mouse actions. A binary built
+  for the old layout is refused with a clear error instead of being misread.
+- The native code is one shared N-API layer (`src/cpp/addon.cpp`) over a small
+  backend per platform. The compiled file is now `kimetra.node`.
+- `index.cjs` is gone. `require('kimetra')` resolves to `src/kimetra.js` directly.
+
 ## 2.1.0
 
 ### Added

@@ -49,14 +49,8 @@ Numbers are milliseconds unless --unit us is given.`;
 /** A mistake in the command line itself, as opposed to a failure while running. */
 class UsageError extends Error {}
 
-// Commands that take a fixed number of arguments. `keys` is variadic and reads
-// until the next command word.
-const ARITY = { key: 1, hotkey: 1, repeat: 2, type: 1, wait: 1, run: 1, list: 0 };
-const VARIADIC = 'keys';
-
-function isCommand(word) {
-    return word === VARIADIC || Object.prototype.hasOwnProperty.call(ARITY, word);
-}
+// Command words. `keys` reads key names until the next one of these.
+const COMMANDS = new Set(['key', 'keys', 'hotkey', 'repeat', 'type', 'wait', 'run', 'list']);
 
 function number(raw, name) {
     const value = Number(raw);
@@ -213,7 +207,7 @@ function parse(argv) {
 
             case 'keys': {
                 const keys = [];
-                while (i + 1 < argv.length && !isCommand(argv[i + 1]) && argv[i + 1][0] !== '-') {
+                while (i + 1 < argv.length && !COMMANDS.has(argv[i + 1]) && argv[i + 1][0] !== '-') {
                     keys.push(argv[++i]);
                 }
                 if (keys.length === 0) throw new UsageError('keys needs at least one key name.');
@@ -253,7 +247,7 @@ async function main() {
         return 0;
     }
 
-    const { Kimetra, Key } = require('../index.cjs');
+    const { Kimetra, Key } = require('../src/kimetra.js');
 
     if (flags.list) {
         console.log(Object.keys(Key).sort().join('\n'));

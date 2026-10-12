@@ -1,9 +1,8 @@
 {
     "name": "kimetra",
     "version": "2.1.1",
-    "description": "A low level and light weight cross-platform keyboard automation library using native OS APIs",
-    "main": "./index.cjs",
-    "module": "./index.mjs",
+    "description": "Keyboard automation for Node.js on Windows, macOS and Linux (X11 and Wayland). Prebuilt, zero dependencies.",
+    "main": "./src/kimetra.js",
     "types": "./index.d.ts",
     "bin": {
         "kimetra": "./bin/cli.js"
@@ -13,7 +12,7 @@
         ".": {
             "types": "./index.d.ts",
             "import": "./index.mjs",
-            "require": "./index.cjs"
+            "require": "./src/kimetra.js"
         }
     },
     "author": {
@@ -28,24 +27,26 @@
     },
     "keywords": [
         "kimetra",
-        "key",
         "keyboard",
-        "robot.js",
-        "nut.js",
         "automation",
+        "keystroke",
+        "hotkeys",
+        "macro",
+        "simulation",
+        "input",
         "native",
         "cross-platform",
         "windows",
         "macos",
         "linux",
-        "hotkeys",
-        "keystroke",
-        "input",
-        "simulation",
-        "macro",
+        "wayland",
         "uinput",
-        "win32",
-        "coregraphics"
+        "sendinput",
+        "coregraphics",
+        "robotjs",
+        "nut.js",
+        "xdotool",
+        "cli"
     ],
     "license": "MIT",
     "repository": {
@@ -65,7 +66,6 @@
         "linux"
     ],
     "files": [
-        "index.cjs",
         "index.mjs",
         "index.d.ts",
         "bin/cli.js",
@@ -73,9 +73,6 @@
         "src/core",
         "src/kimetra.js",
         "scripts/post-install.js",
-        "README.md",
-        "LICENSE",
         "CHANGELOG.md"
-    ],
-    "devDependencies": {}
+    ]
 }

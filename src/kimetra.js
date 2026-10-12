@@ -3,7 +3,9 @@
 const OS = process.platform;
 const ARCH = process.arch;
 
-// Batch opcodes, mirrored in the native addons.
+// Batch layout, mirrored in src/cpp/backend.h. Each op is three int32 slots:
+// [op, a, b]. A binary built for another layout is refused rather than misread.
+const BATCH_FORMAT = 2;
 const OP_DOWN = 0;
 const OP_UP = 1;
 const OP_SLEEP = 2;
@@ -71,16 +73,18 @@ function code(key) {
     return resolved;
 }
 
-function codes(keys, name) {
+function codes(keys, type) {
     if (!Array.isArray(keys)) {
-        throw new TypeError(`${name} needs an array of keys, received ${describe(keys)}.`);
+        throw new TypeError(`${type} needs an array of keys, received ${describe(keys)}.`);
     }
+    return keys.map(code);
+}
 
-    const out = new Array(keys.length);
-    for (let i = 0; i < keys.length; i++) {
-        out[i] = code(keys[i]);
+function count(times) {
+    if (!Number.isInteger(times) || times < 0) {
+        throw new TypeError(`repeat needs a whole number of times, received ${describe(times)}.`);
     }
-    return out;
+    return times;
 }
 
 // Editing shortcuts differ per platform, so they are resolved to key codes once at
@@ -126,181 +130,44 @@ class Kimetra {
     }
 
     // ==================================================
-    // BATCH BUILDING
+    // ACTIONS
     // ==================================================
-    // Builders validate before they push: an op left behind by a call that then
-    // throws would replay on the next one.
-
-    _us(value, fallback, name) {
-        if (value === undefined) return fallback;
-
-        if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
-            throw new TypeError(`${name} must be a non-negative number, received ${describe(value)}.`);
-        }
-
-        const micros = value * this._scale;
-        if (micros > MAX_MICROS) {
-            throw new RangeError(
-                `${name} of ${value} exceeds the maximum of ` +
-                `${Math.floor(MAX_MICROS / this._scale)} ${this.unit}s.`
-            );
-        }
-        return micros;
-    }
-
-    _push(op, arg) {
-        if (this._len + 2 > this._ops.length) {
-            const grown = new Int32Array(this._ops.length * 2);
-            grown.set(this._ops);
-            this._ops = grown;
-        }
-        this._ops[this._len++] = op;
-        this._ops[this._len++] = arg;
-    }
-
-    _buildKey(keyCode, duration, delay) {
-        if (delay > 0) this._push(OP_SLEEP, delay);
-        this._push(OP_DOWN, keyCode);
-        if (duration > 0) this._push(OP_SLEEP, duration);
-        this._push(OP_UP, keyCode);
-    }
-
-    _buildSeries(keyCodes, interval, delay) {
-        if (delay > 0) this._push(OP_SLEEP, delay);
-        for (let i = 0; i < keyCodes.length; i++) {
-            if (i > 0 && interval > 0) this._push(OP_SLEEP, interval);
-            this._push(OP_DOWN, keyCodes[i]);
-            if (this.duration > 0) this._push(OP_SLEEP, this.duration);
-            this._push(OP_UP, keyCodes[i]);
-        }
-    }
-
-    _buildHotkey(keyCodes, duration, delay) {
-        if (delay > 0) this._push(OP_SLEEP, delay);
-
-        for (let i = 0; i < keyCodes.length; i++) {
-            this._push(OP_DOWN, keyCodes[i]);
-            this._push(OP_SLEEP, KEY_GAP);
-        }
-
-        if (duration > 0) this._push(OP_SLEEP, duration);
-
-        for (let i = keyCodes.length - 1; i >= 0; i--) {
-            this._push(OP_UP, keyCodes[i]);
-            this._push(OP_SLEEP, KEY_GAP);
-        }
-    }
-
-    _buildRepeat(keyCode, times, interval, delay) {
-        if (!Number.isInteger(times) || times < 0) {
-            throw new TypeError(`repeat needs a whole number of times, received ${describe(times)}.`);
-        }
-
-        if (delay > 0) this._push(OP_SLEEP, delay);
-        for (let i = 0; i < times; i++) {
-            if (i > 0 && interval > 0) this._push(OP_SLEEP, interval);
-            this._push(OP_DOWN, keyCode);
-            if (this.duration > 0) this._push(OP_SLEEP, this.duration);
-            this._push(OP_UP, keyCode);
-        }
-    }
-
-    _buildText(text, delay) {
-        if (typeof text !== 'string') {
-            throw new TypeError(`text must be a string, received ${describe(text)}.`);
-        }
-
-        if (delay > 0) this._push(OP_SLEEP, delay);
-        this._texts.push(text);
-        this._push(OP_TEXT, this._texts.length - 1);
-    }
-
-    /** Hands the whole batch to native in one call and resets the buffer. */
-    _run() {
-        const length = this._len;
-        const texts = this._texts;
-        this._len = 0;
-
-        let ok;
-        try {
-            ok = Binary.Run(this._ops, length, texts);
-        } finally {
-            if (texts.length) texts.length = 0;
-        }
-
-        if (ok === false) throw new Error(REJECTED);
-        return true;
-    }
-
-    // ==================================================
-    // CORE ACTIONS
-    // ==================================================
+    // Each method is a one-action sequence, so validation and batching live in
+    // _compile alone.
 
     /** Presses a key down and leaves it held. */
-    async keyDown(key, delay) {
-        const keyCode = code(key);
-        const wait = this._us(delay, this.delay, 'delay');
-
-        if (wait > 0) this._push(OP_SLEEP, wait);
-        this._push(OP_DOWN, keyCode);
-        return this._run();
+    keyDown(key, delay) {
+        return this.executeSequence([{ type: 'down', key, delay }]);
     }
 
     /** Releases a held key. */
-    async keyUp(key, delay) {
-        const keyCode = code(key);
-        const wait = this._us(delay, this.delay, 'delay');
-
-        if (wait > 0) this._push(OP_SLEEP, wait);
-        this._push(OP_UP, keyCode);
-        return this._run();
+    keyUp(key, delay) {
+        return this.executeSequence([{ type: 'up', key, delay }]);
     }
 
     /** Presses and releases a key, holding it down for `duration`. */
-    async pressKey(key, duration, delay) {
-        this._buildKey(
-            code(key),
-            this._us(duration, this.duration, 'duration'),
-            this._us(delay, this.delay, 'delay')
-        );
-        return this._run();
+    pressKey(key, duration, delay) {
+        return this.executeSequence([{ type: 'key', key, duration, delay }]);
     }
 
     /** Presses several keys one after another. */
-    async pressKeys(keys, interval, delay) {
-        this._buildSeries(
-            codes(keys, 'pressKeys'),
-            this._us(interval, this.interval, 'interval'),
-            this._us(delay, this.delay, 'delay')
-        );
-        return this._run();
+    pressKeys(keys, interval, delay) {
+        return this.executeSequence([{ type: 'keys', keys, interval, delay }]);
     }
 
     /** Presses keys together as a combination, releasing them in reverse order. */
-    async pressHotkey(keys, duration, delay) {
-        this._buildHotkey(
-            codes(keys, 'pressHotkey'),
-            this._us(duration, this.hotkeyDelay, 'duration'),
-            this._us(delay, this.delay, 'delay')
-        );
-        return this._run();
+    pressHotkey(keys, duration, delay) {
+        return this.executeSequence([{ type: 'hotkey', keys, duration, delay }]);
     }
 
     /** Presses the same key `times` times. */
-    async repeatKey(key, times, interval, delay) {
-        this._buildRepeat(
-            code(key),
-            times,
-            this._us(interval, this.interval, 'interval'),
-            this._us(delay, this.delay, 'delay')
-        );
-        return this._run();
+    repeatKey(key, times, interval, delay) {
+        return this.executeSequence([{ type: 'repeat', key, times, interval, delay }]);
     }
 
     /** Types text. Unicode is supported on Windows and macOS. */
-    async typeText(text, delay) {
-        this._buildText(text, this._us(delay, this.delay, 'delay'));
-        return this._run();
+    typeText(text, delay) {
+        return this.executeSequence([{ type: 'text', text, delay }]);
     }
 
     /** Blocks for `duration` with microsecond accuracy. */
@@ -333,40 +200,59 @@ class Kimetra {
         return this._run();
     }
 
+    /** Releases native resources. Safe to call more than once. */
+    cleanup() {
+        this._len = 0;
+        this._texts.length = 0;
+        Binary.Cleanup();
+    }
+
+    // ==================================================
+    // BATCH BUILDING
+    // ==================================================
+
     _compile(actions) {
         for (const action of actions) {
+            const delay = this._us(action.delay, this.delay, 'delay');
+
             switch (action.type) {
+                case 'down':
+                case 'up': {
+                    const keyCode = code(action.key);
+                    if (delay > 0) this._push(OP_SLEEP, delay);
+                    this._push(action.type === 'down' ? OP_DOWN : OP_UP, keyCode);
+                    break;
+                }
                 case 'key':
                     this._buildKey(
                         code(action.key),
                         this._us(action.duration, this.duration, 'duration'),
-                        this._us(action.delay, this.delay, 'delay')
+                        delay
                     );
                     break;
                 case 'keys':
                     this._buildSeries(
-                        codes(action.keys, 'a "keys" action'),
+                        codes(action.keys, 'keys'),
                         this._us(action.interval, this.interval, 'interval'),
-                        this._us(action.delay, this.delay, 'delay')
+                        delay
+                    );
+                    break;
+                case 'repeat':
+                    this._buildSeries(
+                        new Array(count(action.times)).fill(code(action.key)),
+                        this._us(action.interval, this.interval, 'interval'),
+                        delay
                     );
                     break;
                 case 'hotkey':
                     this._buildHotkey(
-                        codes(action.keys, 'a "hotkey" action'),
+                        codes(action.keys, 'hotkey'),
                         this._us(action.duration, this.hotkeyDelay, 'duration'),
-                        this._us(action.delay, this.delay, 'delay')
-                    );
-                    break;
-                case 'repeat':
-                    this._buildRepeat(
-                        code(action.key),
-                        action.times,
-                        this._us(action.interval, this.interval, 'interval'),
-                        this._us(action.delay, this.delay, 'delay')
+                        delay
                     );
                     break;
                 case 'text':
-                    this._buildText(action.text, this._us(action.delay, this.delay, 'delay'));
+                    this._buildText(action.text, delay);
                     break;
                 case 'wait':
                     if (action.duration === undefined) {
@@ -380,28 +266,113 @@ class Kimetra {
         }
     }
 
-    // ==================================================
-    // EDITING SHORTCUTS
-    // ==================================================
-    // Cmd on macOS, Ctrl elsewhere, with redo and replace using the chord each
-    // platform actually expects.
+    _us(value, fallback, name) {
+        if (value === undefined) return fallback;
 
-    async copy(duration, delay) { return this.pressHotkey(SHORTCUTS.copy, duration, delay); }
-    async paste(duration, delay) { return this.pressHotkey(SHORTCUTS.paste, duration, delay); }
-    async cut(duration, delay) { return this.pressHotkey(SHORTCUTS.cut, duration, delay); }
-    async selectAll(duration, delay) { return this.pressHotkey(SHORTCUTS.selectAll, duration, delay); }
-    async undo(duration, delay) { return this.pressHotkey(SHORTCUTS.undo, duration, delay); }
-    async redo(duration, delay) { return this.pressHotkey(SHORTCUTS.redo, duration, delay); }
-    async save(duration, delay) { return this.pressHotkey(SHORTCUTS.save, duration, delay); }
-    async find(duration, delay) { return this.pressHotkey(SHORTCUTS.find, duration, delay); }
-    async replace(duration, delay) { return this.pressHotkey(SHORTCUTS.replace, duration, delay); }
+        if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+            throw new TypeError(`${name} must be a non-negative number, received ${describe(value)}.`);
+        }
 
-    /** Releases native resources. Safe to call more than once. */
-    cleanup() {
-        this._len = 0;
-        this._texts.length = 0;
-        Binary.Cleanup();
+        const micros = value * this._scale;
+        if (micros > MAX_MICROS) {
+            throw new RangeError(
+                `${name} of ${value} exceeds the maximum of ` +
+                `${Math.floor(MAX_MICROS / this._scale)} ${this.unit}s.`
+            );
+        }
+        return micros;
     }
+
+    _push(op, a, b = 0) {
+        if (this._len + 3 > this._ops.length) {
+            const grown = new Int32Array(this._ops.length * 2);
+            grown.set(this._ops);
+            this._ops = grown;
+        }
+        this._ops[this._len++] = op;
+        this._ops[this._len++] = a;
+        this._ops[this._len++] = b;
+    }
+
+    _buildKey(keyCode, duration, delay) {
+        if (delay > 0) this._push(OP_SLEEP, delay);
+        this._push(OP_DOWN, keyCode);
+        if (duration > 0) this._push(OP_SLEEP, duration);
+        this._push(OP_UP, keyCode);
+    }
+
+    _buildSeries(keyCodes, interval, delay) {
+        if (delay > 0) this._push(OP_SLEEP, delay);
+        for (let i = 0; i < keyCodes.length; i++) {
+            if (i > 0 && interval > 0) this._push(OP_SLEEP, interval);
+            this._push(OP_DOWN, keyCodes[i]);
+            if (this.duration > 0) this._push(OP_SLEEP, this.duration);
+            this._push(OP_UP, keyCodes[i]);
+        }
+    }
+
+    // Keys go down in order and come up in reverse, KEY_GAP apart. The hold after
+    // the last key-down includes one gap.
+    _buildHotkey(keyCodes, duration, delay) {
+        if (delay > 0) this._push(OP_SLEEP, delay);
+
+        const n = keyCodes.length;
+        for (let i = 0; i < n; i++) {
+            if (i > 0) this._push(OP_SLEEP, KEY_GAP);
+            this._push(OP_DOWN, keyCodes[i]);
+        }
+
+        if (n > 0) this._push(OP_SLEEP, Math.min(KEY_GAP + duration, MAX_MICROS));
+
+        for (let i = n - 1; i >= 0; i--) {
+            this._push(OP_UP, keyCodes[i]);
+            if (i > 0) this._push(OP_SLEEP, KEY_GAP);
+        }
+    }
+
+    _buildText(text, delay) {
+        if (typeof text !== 'string') {
+            throw new TypeError(`text must be a string, received ${describe(text)}.`);
+        }
+
+        if (delay > 0) this._push(OP_SLEEP, delay);
+        this._texts.push(text);
+        this._push(OP_TEXT, this._texts.length - 1);
+    }
+
+    /** Hands the whole batch to native in one call and resets the buffer. */
+    _run() {
+        const length = this._len;
+        const texts = this._texts;
+        this._len = 0;
+
+        if (Binary.Format !== BATCH_FORMAT) {
+            texts.length = 0;
+            throw new Error(
+                `The Kimetra binary for ${OS}-${ARCH} is out of date. Reinstall kimetra, ` +
+                'or rebuild it from source.'
+            );
+        }
+
+        let ok;
+        try {
+            ok = Binary.Run(this._ops, length, texts);
+        } finally {
+            texts.length = 0;
+        }
+
+        if (ok === false) throw new Error(REJECTED);
+        return true;
+    }
+}
+
+// Editing shortcuts: Cmd on macOS, Ctrl elsewhere, with redo and replace using the
+// chord each platform actually expects.
+for (const name of Object.keys(SHORTCUTS)) {
+    const keys = SHORTCUTS[name];
+    Kimetra.prototype[name] = function (duration, delay) {
+        return this.pressHotkey(keys, duration, delay);
+    };
 }
 
 class Kimacro {
@@ -451,7 +422,7 @@ class Kimacro {
     }
 
     /** Runs the macro. The sequence is kept, so a macro can be replayed. */
-    async exec() {
+    exec() {
         return this.ki.executeSequence(this.sequence);
     }
 
@@ -477,16 +448,8 @@ class Kimacro {
     }
 }
 
-function createKimetra(options) {
-    return new Kimetra(options);
-}
-
-function createKimacro(options) {
-    return new Kimacro(options);
-}
-
 module.exports = {
-    Kimetra: createKimetra,
-    Kimacro: createKimacro,
+    Kimetra: options => new Kimetra(options),
+    Kimacro: options => new Kimacro(options),
     Key
 };

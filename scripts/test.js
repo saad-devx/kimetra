@@ -12,7 +12,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const { pathToFileURL } = require('url');
 
-const { Kimetra, Kimacro, Key } = require('../index.cjs');
+const { Kimetra, Kimacro, Key } = require('..');
 
 const OP_DOWN = 0;
 const OP_UP = 1;
@@ -22,14 +22,18 @@ const OP_TEXT = 3;
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
 
-/** Replaces the native call with a capture, so nothing reaches the OS. */
+/**
+ * Replaces the native call with a capture, so nothing reaches the OS. Ops are
+ * reported as [op, a]; the third slot is asserted to be zero, since no op uses it yet.
+ */
 function capture(ki) {
     let ops = null;
     let texts = null;
 
     ki._run = function () {
         ops = [];
-        for (let i = 0; i < this._len; i += 2) {
+        for (let i = 0; i < this._len; i += 3) {
+            assert.strictEqual(this._ops[i + 2], 0, 'unused third slot must be zero');
             ops.push([this._ops[i], this._ops[i + 1]]);
         }
         texts = this._texts.slice();
@@ -45,8 +49,8 @@ function capture(ki) {
 // Entry points
 // ==================================================
 
-test('CJS entry exports exactly Kimetra, Kimacro and Key', () => {
-    const api = require('../index.cjs');
+test('the package entry exports exactly Kimetra, Kimacro and Key', () => {
+    const api = require('..');
     assert.deepStrictEqual(Object.keys(api).sort(), ['Key', 'Kimacro', 'Kimetra']);
     assert.strictEqual(typeof api.Kimetra, 'function');
     assert.strictEqual(typeof api.Kimacro, 'function');
@@ -150,8 +154,8 @@ test('a raw key code outside the valid range is rejected', async () => {
 
 test('arguments that must be arrays are checked', async () => {
     const ki = Kimetra();
-    await assert.rejects(() => ki.pressHotkey('ctrl'), /pressHotkey needs an array of keys/);
-    await assert.rejects(() => ki.pressKeys('abc'), /pressKeys needs an array of keys/);
+    await assert.rejects(() => ki.pressHotkey('ctrl'), /hotkey needs an array of keys/);
+    await assert.rejects(() => ki.pressKeys('abc'), /keys needs an array of keys/);
     await assert.rejects(() => ki.executeSequence('key enter'), /needs an array of actions/);
 });
 
@@ -199,17 +203,6 @@ test('wait and sleep require a duration', async () => {
     await assert.rejects(() => ki.sleep(), /sleep needs a duration/);
 });
 
-test('a rejected call leaves no partial batch behind', async () => {
-    const ki = Kimetra({ delay: 500 });
-    const taken = capture(ki);
-
-    await assert.rejects(() => ki.keyDown('entre'), /Unknown key "entre"/);
-    assert.strictEqual(ki._len, 0);
-
-    await ki.keyDown('a');
-    assert.deepStrictEqual(taken().ops, [[OP_SLEEP, 500], [OP_DOWN, Key.a]]);
-});
-
 // ==================================================
 // Batch compilation
 // ==================================================
@@ -225,17 +218,36 @@ test('pressKey compiles to down, hold, up', async () => {
     ]);
 });
 
-test('pressHotkey releases in reverse order', async () => {
+test('pressHotkey releases in reverse order, a gap apart, with no trailing gap', async () => {
     const ki = Kimetra();
     const taken = capture(ki);
     await ki.pressHotkey(['ctrl', 'shift', 'a']);
 
-    const ops = taken().ops;
-    const downs = ops.filter(o => o[0] === OP_DOWN).map(o => o[1]);
-    const ups = ops.filter(o => o[0] === OP_UP).map(o => o[1]);
+    assert.deepStrictEqual(taken().ops, [
+        [OP_DOWN, Key.ctrl], [OP_SLEEP, 1000],
+        [OP_DOWN, Key.shift], [OP_SLEEP, 1000],
+        [OP_DOWN, Key.a], [OP_SLEEP, 2500],
+        [OP_UP, Key.a], [OP_SLEEP, 1000],
+        [OP_UP, Key.shift], [OP_SLEEP, 1000],
+        [OP_UP, Key.ctrl]
+    ]);
+});
 
-    assert.deepStrictEqual(downs, [Key.ctrl, Key.shift, Key.a]);
-    assert.deepStrictEqual(ups, [Key.a, Key.shift, Key.ctrl]);
+test('keyDown and keyUp compile to a single event, also inside a sequence', async () => {
+    const ki = Kimetra({ delay: 500 });
+    const taken = capture(ki);
+
+    await ki.keyDown('shift');
+    assert.deepStrictEqual(taken().ops, [[OP_SLEEP, 500], [OP_DOWN, Key.shift]]);
+
+    await ki.executeSequence([
+        { type: 'down', key: 'shift', delay: 0 },
+        { type: 'key', key: 'a', duration: 0, delay: 0 },
+        { type: 'up', key: 'shift', delay: 0 }
+    ]);
+    assert.deepStrictEqual(taken().ops, [
+        [OP_DOWN, Key.shift], [OP_DOWN, Key.a], [OP_UP, Key.a], [OP_UP, Key.shift]
+    ]);
 });
 
 test('pressKeys applies the interval between keys, not the delay', async () => {
@@ -293,30 +305,21 @@ test('a whole sequence compiles into one batch', async () => {
     assert.deepStrictEqual(result.ops[result.ops.length - 1], [OP_UP, Key.enter]);
 });
 
-test('an unknown action type throws and leaves no partial batch', async () => {
-    const ki = Kimetra();
-    await assert.rejects(() => ki.executeSequence([{ type: 'nope' }]), /Unknown action type "nope"/);
-    assert.strictEqual(ki._len, 0);
-});
-
-test('a bad key mid-sequence discards the partial batch', async () => {
-    const ki = Kimetra();
+test('a failed batch leaves nothing behind for the next call', async () => {
+    const ki = Kimetra({ delay: 500 });
     const taken = capture(ki);
 
+    await assert.rejects(() => ki.keyDown('entre'), /Unknown key "entre"/);
+    await assert.rejects(() => ki.executeSequence([{ type: 'nope' }]), /Unknown action type "nope"/);
     await assert.rejects(
-        () => ki.executeSequence([{ type: 'key', key: 'enter' }, { type: 'key', key: 'entre' }]),
+        () => ki.executeSequence([{ type: 'text', text: 'x' }, { type: 'key', key: 'entre' }]),
         /Unknown key "entre"/
     );
     assert.strictEqual(ki._len, 0);
     assert.strictEqual(ki._texts.length, 0);
 
-    // The next call must not replay anything left over from the failed one.
-    await ki.pressKey('a');
-    assert.deepStrictEqual(taken().ops, [
-        [OP_DOWN, Key.a],
-        [OP_SLEEP, 700],
-        [OP_UP, Key.a]
-    ]);
+    await ki.keyDown('a');
+    assert.deepStrictEqual(taken().ops, [[OP_SLEEP, 500], [OP_DOWN, Key.a]]);
 });
 
 // ==================================================

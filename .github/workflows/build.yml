@@ -34,19 +34,19 @@ jobs:
           node-gyp configure
           node-gyp build
           mkdir -p prebuilds/linux-${{ matrix.arch }}
-          cp build/Release/keyboard.node prebuilds/linux-${{ matrix.arch }}/
+          cp build/Release/kimetra.node prebuilds/linux-${{ matrix.arch }}/
 
       - name: Test
         if: matrix.arch == 'x64'
         run: |
           mkdir -p src/bin
-          cp build/Release/keyboard.node src/bin/linuxx64.node
+          cp build/Release/kimetra.node src/bin/linuxx64.node
           npm test
 
       - uses: actions/upload-artifact@v4
         with:
           name: linux-${{ matrix.arch }}
-          path: prebuilds/linux-${{ matrix.arch }}/keyboard.node
+          path: prebuilds/linux-${{ matrix.arch }}/kimetra.node
 
   build-windows:
     runs-on: windows-latest
@@ -82,19 +82,19 @@ jobs:
           node-gyp configure
           node-gyp build
           mkdir prebuilds\win32-${{ matrix.arch }}
-          copy build\Release\keyboard.node prebuilds\win32-${{ matrix.arch }}\
+          copy build\Release\kimetra.node prebuilds\win32-${{ matrix.arch }}\
 
       - name: Test
         if: matrix.arch == 'x64'
         run: |
           New-Item -ItemType Directory -Force -Path src\bin | Out-Null
-          copy build\Release\keyboard.node src\bin\win32x64.node
+          copy build\Release\kimetra.node src\bin\win32x64.node
           npm test
 
       - uses: actions/upload-artifact@v4
         with:
           name: win32-${{ matrix.arch }}
-          path: prebuilds/win32-${{ matrix.arch }}/keyboard.node
+          path: prebuilds/win32-${{ matrix.arch }}/kimetra.node
 
   build-macos:
     runs-on: macos-latest
@@ -122,22 +122,22 @@ jobs:
           node-gyp configure
           node-gyp build
           mkdir -p prebuilds/darwin-${{ matrix.arch }}
-          cp build/Release/keyboard.node prebuilds/darwin-${{ matrix.arch }}/
+          cp build/Release/kimetra.node prebuilds/darwin-${{ matrix.arch }}/
 
       - name: Verify architecture
-        run: file prebuilds/darwin-${{ matrix.arch }}/keyboard.node
+        run: file prebuilds/darwin-${{ matrix.arch }}/kimetra.node
 
       - name: Test
         if: matrix.arch == 'arm64'
         run: |
           mkdir -p src/bin
-          cp build/Release/keyboard.node src/bin/darwinarm64.node
+          cp build/Release/kimetra.node src/bin/darwinarm64.node
           npm test
 
       - uses: actions/upload-artifact@v4
         with:
           name: darwin-${{ matrix.arch }}
-          path: prebuilds/darwin-${{ matrix.arch }}/keyboard.node
+          path: prebuilds/darwin-${{ matrix.arch }}/kimetra.node
 
   publish-npm:
     needs: [build-linux, build-windows, build-macos]
@@ -174,12 +174,12 @@ jobs:
       - name: Organize binaries into src/bin
         run: |
           mkdir -p src/bin
-          cp artifacts/linux-x64/keyboard.node src/bin/linuxx64.node
-          cp artifacts/linux-ia32/keyboard.node src/bin/linuxia32.node
-          cp artifacts/win32-x64/keyboard.node src/bin/win32x64.node
-          cp artifacts/win32-ia32/keyboard.node src/bin/win32ia32.node
-          cp artifacts/darwin-x64/keyboard.node src/bin/darwinx64.node
-          cp artifacts/darwin-arm64/keyboard.node src/bin/darwinarm64.node
+          cp artifacts/linux-x64/kimetra.node src/bin/linuxx64.node
+          cp artifacts/linux-ia32/kimetra.node src/bin/linuxia32.node
+          cp artifacts/win32-x64/kimetra.node src/bin/win32x64.node
+          cp artifacts/win32-ia32/kimetra.node src/bin/win32ia32.node
+          cp artifacts/darwin-x64/kimetra.node src/bin/darwinx64.node
+          cp artifacts/darwin-arm64/kimetra.node src/bin/darwinarm64.node
 
       - name: Verify every target is present and freshly built
         run: |

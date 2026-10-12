@@ -11,6 +11,7 @@ Keyboard automation for Node.js, calling the OS input APIs directly through a
 precompiled native addon: `SendInput` on Windows, `CGEvent` on macOS, `uinput`
 on Linux.
 
+- **Works on Wayland.** `uinput` reaches every app on Linux, on both X11 and Wayland.
 - **One native call per sequence.** JavaScript never runs between key events.
 - **Microsecond timing.** Waits target an absolute deadline instead of drifting.
 - **No dependencies, no build step.** One binary per platform, under 150 KB installed.
@@ -274,7 +275,11 @@ await ki.executeSequence([
 | `hotkey` | `keys[]`, `duration?`, `delay?` |
 | `repeat` | `key`, `times`, `interval?`, `delay?` |
 | `text` | `text`, `delay?` |
+| `down` / `up` | `key`, `delay?` |
 | `wait` | `duration` |
+
+Every method above is a one-action sequence, so a method call and the matching
+action behave identically.
 
 ### Kimacro(options)
 
@@ -363,7 +368,7 @@ Xcode command line tools on macOS, `build-essential` on Linux):
 npm install node-addon-api && npx node-gyp configure build
 ```
 
-That produces `build/Release/keyboard.node`. Copy it into `src/bin` under the
+That produces `build/Release/kimetra.node`. Copy it into `src/bin` under the
 name for your platform and architecture, for example `src/bin/win32x64.node`,
 then run `npm test`.
 
