@@ -40,7 +40,7 @@
 
         ["OS=='linux'", {
           "sources": ["src/cpp/linux.cpp"],
-          "cflags_cc": ["-std=c++17", "-O3", "-flto", "-fvisibility=hidden"],
+          "cflags_cc": ["-std=c++17", "-Os", "-flto", "-fvisibility=hidden"],
           "ldflags": ["-flto", "-Wl,--strip-all", "-Wl,--as-needed", "-s"]
         }]
       ]
