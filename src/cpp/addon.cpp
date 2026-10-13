@@ -1,6 +1,6 @@
 #include "backend.h"
 
-// N-API bindings shared by every platform. Platform code lives behind backend.h.
+// N-API bindings for every platform; platform code is behind backend.h.
 namespace
 {
     using namespace kimetra;
@@ -52,8 +52,7 @@ namespace
         return info.Env().Undefined();
     }
 
-    // Executes a whole batch without returning to JS between events.
-    // Arguments: ops (Int32Array of [op, a, b] records), slot count, texts.
+    // Run(ops, slotCount, texts): executes a batch without returning to JS.
     Napi::Value JsRun(const Napi::CallbackInfo &info)
     {
         Napi::Env env = info.Env();

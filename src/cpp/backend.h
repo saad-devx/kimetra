@@ -5,8 +5,7 @@
 
 namespace kimetra
 {
-    // Batch layout, mirrored in src/kimetra.js. Each op is three int32 slots:
-    // [op, a, b]. Raise BATCH_FORMAT whenever the layout changes.
+    // Batch layout: [op, a, b] int32 records, mirrored in src/kimetra.js. Bump on change.
     constexpr int BATCH_FORMAT = 2;
 
     enum Op
@@ -22,8 +21,7 @@ namespace kimetra
         OP_SCROLL = 7
     };
 
-    // Waits stop this far short of the deadline and busy-wait the rest, which
-    // keeps them accurate without burning a core.
+    // Waits sleep until this far before the deadline, then spin.
     constexpr int SPIN_MARGIN_US = 1200;
 
     // Implemented once per platform in win32.cpp, darwin.cpp and linux.cpp.

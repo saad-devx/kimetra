@@ -1,7 +1,4 @@
-// macOS CGKeyCode values (ANSI physical layout).
-// Undirected modifier names (ctrl, shift, alt, meta) resolve to the left-hand key.
-// Keys macOS hardware does not have (insert, numlock, printscreen, media transport,
-// browser keys) are intentionally absent and throw a clear error when used.
+// macOS CGKeyCode values (ANSI layout). Keys macOS lacks are absent and throw.
 module.exports = {
     // Letters
     a: 0x00, b: 0x0B, c: 0x08, d: 0x02, e: 0x0E, f: 0x03, g: 0x05,

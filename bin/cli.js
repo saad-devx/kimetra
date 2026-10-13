@@ -108,9 +108,7 @@ function loadMacro(source) {
     return actions;
 }
 
-// Numbers the user types are scaled to microseconds before anything else sees
-// them, so a macro file always holds microseconds no matter which unit produced
-// it. That keeps CLI files and `Kimacro().toJSON()` files interchangeable.
+// Typed numbers are scaled to microseconds, so macro files match Kimacro().toJSON().
 const SCALED_FIELDS = ['duration', 'delay', 'interval'];
 
 function toMicroseconds(actions, borrowed, factor) {
@@ -135,8 +133,7 @@ function parse(argv) {
     let unit = 'ms';
     let i = 0;
 
-    // Single pass, so a command argument that starts with "-" is still read as an
-    // argument rather than mistaken for a flag.
+    // Single pass, so an argument starting with "-" is not taken for a flag.
     const next = (command, what) => {
         if (i + 1 >= argv.length) {
             throw new UsageError(`${command} needs ${what}.`);
@@ -236,8 +233,7 @@ function parse(argv) {
 async function main() {
     const { options, actions, flags } = parse(process.argv.slice(2));
 
-    // Neither of these needs the native addon, so they stay fast and keep working
-    // on platforms Kimetra has no binary for.
+    // No addon needed, so these work even where Kimetra has no binary.
     if (flags.help || process.argv.length === 2) {
         console.log(HELP);
         return 0;
@@ -265,8 +261,7 @@ async function main() {
 
     const ki = Kimetra(options);
     try {
-        // One native call per pass. Looping in JavaScript rather than compiling
-        // every pass into one batch keeps Ctrl-C responsive between passes.
+        // One native call per pass keeps Ctrl-C responsive between passes.
         for (let pass = 0; pass < flags.times; pass++) {
             await ki.executeSequence(actions);
         }

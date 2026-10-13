@@ -1,5 +1,4 @@
-// Linux evdev/uinput key codes (linux/input-event-codes.h).
-// Undirected modifier names (ctrl, shift, alt, meta) resolve to the left-hand key.
+// Linux evdev key codes (linux/input-event-codes.h).
 module.exports = {
     // Letters
     a: 30, b: 48, c: 46, d: 32, e: 18, f: 33, g: 34,

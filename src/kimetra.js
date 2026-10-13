@@ -3,20 +3,17 @@
 const OS = process.platform;
 const ARCH = process.arch;
 
-// Batch layout, mirrored in src/cpp/backend.h. Each op is three int32 slots:
-// [op, a, b]. A binary built for another layout is refused rather than misread.
+// Batch layout: [op, a, b] int32 records, mirrored in src/cpp/backend.h.
 const BATCH_FORMAT = 2;
 const OP_DOWN = 0;
 const OP_UP = 1;
 const OP_SLEEP = 2;
 const OP_TEXT = 3;
 
-// Gap between the individual key events of a combination. Native execution has no
-// incidental scheduling delay, so the gap has to be explicit for applications to
-// register a modifier before the key that follows it.
+// Gap between key events of a combination, so apps register a modifier in time.
 const KEY_GAP = 1000;
 
-// Batch arguments are stored in an Int32Array and read back as a C int.
+// Batch slots are int32.
 const MAX_MICROS = 2147483647;
 const MAX_KEYCODE = 65535;
 
@@ -87,8 +84,7 @@ function count(times) {
     return times;
 }
 
-// Editing shortcuts differ per platform, so they are resolved to key codes once at
-// load time and never recomputed.
+// Resolved to key codes once, at load.
 const MOD = OS === 'darwin' ? 'meta' : 'ctrl';
 
 const SHORTCUTS = {
@@ -117,7 +113,7 @@ class Kimetra {
         this.core = Binary;
         this.unit = scale === 1000 ? 'millisecond' : 'microsecond';
 
-        // Defaults are stored in microseconds; only caller supplied values are scaled.
+        // Defaults are microseconds; only caller values are scaled.
         this._scale = scale;
         this.delay = this._us(opts.delay, 0, 'delay');
         this.interval = this._us(opts.interval, 700, 'interval');
@@ -129,11 +125,7 @@ class Kimetra {
         this._texts = [];
     }
 
-    // ==================================================
-    // ACTIONS
-    // ==================================================
-    // Each method is a one-action sequence, so validation and batching live in
-    // _compile alone.
+    // Each method is a one-action sequence; validation lives in _compile.
 
     /** Presses a key down and leaves it held. */
     keyDown(key, delay) {
@@ -191,7 +183,7 @@ class Kimetra {
         try {
             this._compile(actions);
         } catch (err) {
-            // Never leave a half built batch behind for the next call to replay.
+            // Drop the partial batch so the next call can't replay it.
             this._len = 0;
             this._texts.length = 0;
             throw err;
@@ -206,10 +198,6 @@ class Kimetra {
         this._texts.length = 0;
         Binary.Cleanup();
     }
-
-    // ==================================================
-    // BATCH BUILDING
-    // ==================================================
 
     _compile(actions) {
         for (const action of actions) {
@@ -311,8 +299,7 @@ class Kimetra {
         }
     }
 
-    // Keys go down in order and come up in reverse, KEY_GAP apart. The hold after
-    // the last key-down includes one gap.
+    // Down in order, up in reverse, KEY_GAP apart. The hold includes one gap.
     _buildHotkey(keyCodes, duration, delay) {
         if (delay > 0) this._push(OP_SLEEP, delay);
 
@@ -366,8 +353,7 @@ class Kimetra {
     }
 }
 
-// Editing shortcuts: Cmd on macOS, Ctrl elsewhere, with redo and replace using the
-// chord each platform actually expects.
+// Editing shortcuts: Cmd on macOS, Ctrl elsewhere.
 for (const name of Object.keys(SHORTCUTS)) {
     const keys = SHORTCUTS[name];
     Kimetra.prototype[name] = function (duration, delay) {
@@ -386,8 +372,7 @@ class Kimacro {
             throw new TypeError(`add needs an action object, received ${describe(action)}.`);
         }
 
-        // Copy without unset fields: survives a JSON round trip, and leaves the
-        // caller's object alone.
+        // Copy without unset fields; the caller's object is left untouched.
         const copy = {};
         for (const field of Object.keys(action)) {
             if (action[field] !== undefined) copy[field] = action[field];

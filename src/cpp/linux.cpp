@@ -12,8 +12,7 @@
 
 namespace
 {
-    // Time for the compositor to enumerate the new virtual device. Paid once per
-    // process; too short and the first keystroke is dropped.
+    // Time for the compositor to pick up the new device; too short drops the first key.
     constexpr int DEVICE_SETTLE_US = 250000;
 
     const char *PERMISSION_HINT =
@@ -41,7 +40,7 @@ namespace
             return -1;
         }
 
-        // Declare the full standard key range so no mapped key is silently filtered.
+        // Declare the full key range so no mapped key is filtered.
         for (int key = 1; key <= 255; key++)
             ioctl(g_fd, UI_SET_KEYBIT, key);
 
@@ -71,8 +70,7 @@ namespace
         return write(fd, &ev, sizeof(ev)) == sizeof(ev);
     }
 
-    // uinput emits scan codes, so typed text is limited to what a US QWERTY layout
-    // can produce. Anything else is reported rather than silently dropped.
+    // uinput sends scan codes, so text is limited to US QWERTY characters.
     const std::unordered_map<char16_t, int> &PlainKeys()
     {
         static const std::unordered_map<char16_t, int> map = {
@@ -171,7 +169,7 @@ namespace kimetra
         if (fd < 0)
             return false;
 
-        // Validate up front so a bad character cannot leave half the text typed.
+        // Validate first, so a bad character can't leave text half typed.
         for (char16_t ch : text)
         {
             bool shift;

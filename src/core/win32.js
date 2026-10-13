@@ -1,5 +1,4 @@
 // Windows virtual-key codes.
-// Undirected modifier names (ctrl, shift, alt, meta) resolve to the left-hand key.
 module.exports = {
     // Letters
     a: 0x41, b: 0x42, c: 0x43, d: 0x44, e: 0x45, f: 0x46, g: 0x47,

@@ -45,9 +45,7 @@ function capture(ki) {
     return () => ({ ops, texts });
 }
 
-// ==================================================
 // Entry points
-// ==================================================
 
 test('the package entry exports exactly Kimetra, Kimacro and Key', () => {
     const api = require('..');
@@ -65,9 +63,7 @@ test('ESM entry loads and exposes the same three names', async () => {
     assert.strictEqual(typeof mod.Key, 'object');
 });
 
-// ==================================================
 // Key map
-// ==================================================
 
 test('undirected modifiers exist and match the left-hand key', () => {
     for (const [plain, left] of [['ctrl', 'lctrl'], ['shift', 'lshift'], ['alt', 'lalt'], ['meta', 'lmeta']]) {
@@ -97,9 +93,7 @@ test('Key is frozen', () => {
     assert.strictEqual(Object.isFrozen(Key), true);
 });
 
-// ==================================================
 // Options
-// ==================================================
 
 test('defaults are microseconds', () => {
     for (const ki of [Kimetra(), Kimetra(null)]) {
@@ -125,9 +119,7 @@ test('millisecond unit scales per-call arguments', async () => {
     assert.deepStrictEqual(taken().ops[1], [OP_SLEEP, 5000]);
 });
 
-// ==================================================
 // Key resolution
-// ==================================================
 
 test('an unknown key name throws a useful error', async () => {
     const ki = Kimetra();
@@ -141,9 +133,7 @@ test('a raw code from Key passes through', async () => {
     assert.strictEqual(taken().ops[0][1], Key.enter);
 });
 
-// ==================================================
 // Input validation
-// ==================================================
 
 test('a raw key code outside the valid range is rejected', async () => {
     const ki = Kimetra();
@@ -203,9 +193,7 @@ test('wait and sleep require a duration', async () => {
     await assert.rejects(() => ki.sleep(), /sleep needs a duration/);
 });
 
-// ==================================================
 // Batch compilation
-// ==================================================
 
 test('pressKey compiles to down, hold, up', async () => {
     const ki = Kimetra();
@@ -278,9 +266,7 @@ test('typeText passes the string through the batch', async () => {
     assert.deepStrictEqual(result.texts, ['hello']);
 });
 
-// ==================================================
 // Sequences
-// ==================================================
 
 test('a wait action honours its duration', async () => {
     const ki = Kimetra();
@@ -322,9 +308,7 @@ test('a failed batch leaves nothing behind for the next call', async () => {
     assert.deepStrictEqual(taken().ops, [[OP_SLEEP, 500], [OP_DOWN, Key.a]]);
 });
 
-// ==================================================
 // Shortcuts
-// ==================================================
 
 test('editing shortcuts use the right modifier for this platform', async () => {
     const ki = Kimetra();
@@ -351,9 +335,7 @@ test('redo uses the chord each platform expects', async () => {
     assert.deepStrictEqual(downs, expected);
 });
 
-// ==================================================
 // Macros
-// ==================================================
 
 test('a macro is replayable and survives exec', async () => {
     const macro = Kimacro().pressKey('enter').typeText('hi').wait(1000);
@@ -386,9 +368,7 @@ test('fromJSON rejects anything that is not an array', () => {
     assert.throws(() => Kimacro().fromJSON({ nope: true }), /expects an array/);
 });
 
-// ==================================================
 // Native surface
-// ==================================================
 
 test('the addon exposes the full core surface', () => {
     const ki = Kimetra();
@@ -406,8 +386,7 @@ test('cleanup is callable more than once', () => {
 test('sleep does not busy-wait, including after cleanup', () => {
     const ki = Kimetra();
 
-    // Fraction of a core burned while sleeping. The coarse wait should block, so
-    // only the 1.2ms spin margin costs CPU. A full busy-wait would report ~1.0.
+    // Fraction of a core used while sleeping; a full busy-wait reports ~1.0.
     const coreUsage = () => {
         const cpuStart = process.cpuUsage();
         const wallStart = process.hrtime.bigint();
@@ -435,7 +414,7 @@ test('sleep never returns early and reads the right unit', () => {
         const elapsed = Number(process.hrtime.bigint() - start) / 1000;
         measured.push(`${micros}us -> ${elapsed.toFixed(0)}us`);
 
-        // The guarantee worth testing: a sleep never finishes early.
+        // A sleep must never finish early.
         assert.ok(
             elapsed >= micros * 0.98,
             `Sleep(${micros}) returned after ${elapsed.toFixed(0)}us, which is early`
@@ -450,10 +429,8 @@ test('sleep never returns early and reads the right unit', () => {
     console.log(`        timing: ${measured.join(', ')}`);
 });
 
-// ==================================================
 // CLI
-// ==================================================
-// The CLI is driven through --dry-run, so these tests send no key events either.
+// Driven through --dry-run, so no key events are sent.
 
 const CLI = path.resolve(__dirname, '../bin/cli.js');
 
@@ -470,8 +447,7 @@ function cli(args) {
 }
 
 test('no command word is also a key name', () => {
-    // A chain reads tokens until the next command word, so a command that was
-    // also a key name would make `keys a <name> b` ambiguous.
+    // `keys` reads until the next command word, so no command may be a key name.
     for (const word of ['key', 'keys', 'hotkey', 'repeat', 'type', 'wait', 'run', 'list']) {
         assert.strictEqual(Key[word], undefined, `"${word}" is both a command and a key name`);
     }
@@ -538,8 +514,6 @@ test('help and version do not need the native addon', () => {
         assert.ok(out.trim().length > 0, `${flag} printed nothing`);
     }
 });
-
-// ==================================================
 
 (async () => {
     let failed = 0;

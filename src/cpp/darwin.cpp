@@ -7,8 +7,7 @@
 
 namespace
 {
-    // CGEventKeyboardSetUnicodeString is unreliable for long strings, so text is
-    // posted in small chunks.
+    // Long unicode strings are unreliable, so text is posted in chunks.
     constexpr size_t TEXT_CHUNK = 20;
 
     constexpr int KEY_RETURN = 0x24;
@@ -22,8 +21,7 @@ namespace
 
     bool g_trusted = false;
 
-    // macOS does not derive modifier state from separately posted key events, so the
-    // held modifiers are tracked and stamped onto every event in the batch.
+    // Held modifiers, stamped on every event; macOS doesn't derive them itself.
     CGEventFlags g_flags = 0;
 
     CGEventFlags FlagFor(int code) noexcept
@@ -98,8 +96,7 @@ namespace kimetra
         return true;
     }
 
-    // Newline and tab are sent as real key presses and carriage returns are
-    // dropped, matching Windows and Linux.
+    // Newline and tab are real key presses; carriage returns are dropped.
     bool SendText(const std::u16string &text, std::string &)
     {
         std::vector<UniChar> chunk;

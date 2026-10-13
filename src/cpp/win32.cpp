@@ -50,8 +50,7 @@ namespace kimetra
         EnsureTimer();
     }
 
-    // Input is never blocked by a permission. An elevated foreground window
-    // rejects it instead, which SendInput reports.
+    // No permission needed; an elevated window rejects input instead.
     bool Ready(Napi::Env)
     {
         return true;
@@ -71,8 +70,7 @@ namespace kimetra
         return SendInput(1, &input, sizeof(INPUT)) == 1;
     }
 
-    // Unicode injection. Newline and tab are sent as real key presses and carriage
-    // returns are dropped, matching macOS and Linux.
+    // Newline and tab are real key presses; carriage returns are dropped.
     bool SendText(const std::u16string &text, std::string &)
     {
         std::vector<INPUT> inputs;
