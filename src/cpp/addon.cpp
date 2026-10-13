@@ -77,6 +77,7 @@ namespace
         for (uint32_t i = 0; i + 2 < count; i += 3)
         {
             const int32_t a = data[i + 1];
+            const int32_t b = data[i + 2];
 
             switch (data[i])
             {
@@ -85,6 +86,21 @@ namespace
                 break;
             case OP_UP:
                 ok = SendKey(a, false) && ok;
+                break;
+            case OP_MOVE:
+                ok = MoveMouse(a, b, false) && ok;
+                break;
+            case OP_MOVE_BY:
+                ok = MoveMouse(a, b, true) && ok;
+                break;
+            case OP_BUTTON_DOWN:
+                ok = SendButton(a, true, b) && ok;
+                break;
+            case OP_BUTTON_UP:
+                ok = SendButton(a, false, b) && ok;
+                break;
+            case OP_SCROLL:
+                ok = Scroll(a, b) && ok;
                 break;
             case OP_SLEEP:
                 PreciseSleep(a);
@@ -110,6 +126,21 @@ namespace
         return Napi::Boolean::New(env, ok);
     }
 
+    // MousePosition(): { x, y }, or null where the OS does not expose it.
+    Napi::Value JsMousePosition(const Napi::CallbackInfo &info)
+    {
+        Napi::Env env = info.Env();
+        int x = 0;
+        int y = 0;
+        if (!MousePosition(x, y))
+            return env.Null();
+
+        Napi::Object point = Napi::Object::New(env);
+        point.Set("x", Napi::Number::New(env, x));
+        point.Set("y", Napi::Number::New(env, y));
+        return point;
+    }
+
     Napi::Value JsCleanup(const Napi::CallbackInfo &info)
     {
         Release();
@@ -125,6 +156,7 @@ namespace
         exports.Set("SendString", Napi::Function::New(env, JsSendString));
         exports.Set("Sleep", Napi::Function::New(env, JsSleep));
         exports.Set("Run", Napi::Function::New(env, JsRun));
+        exports.Set("MousePosition", Napi::Function::New(env, JsMousePosition));
         exports.Set("Cleanup", Napi::Function::New(env, JsCleanup));
         exports.Set("Format", Napi::Number::New(env, BATCH_FORMAT));
 

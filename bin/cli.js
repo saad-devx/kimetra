@@ -9,48 +9,70 @@
  * process start.
  */
 
-const HELP = `kimetra - keyboard automation from the terminal
+const HELP = `kimetra - keyboard and mouse automation from the terminal
 
 Usage
   kimetra <command> [args] [<command> [args] ...] [options]
 
-Commands
-  key <name>            Press and release a key
-  keys <name...>        Press several keys in order
-  hotkey <a+b+c>        Press keys together, release in reverse
-  repeat <name> <n>     Press a key n times
-  type <text>           Type text, or "-" to read stdin
-  wait <n>              Pause
-  run <file>            Insert the actions from a macro JSON file, or "-" for stdin
-  list                  Print the key names this platform accepts
+Keyboard
+  key <name>              Press and release a key
+  keys <name...>          Press several keys in order
+  hotkey <a+b+c>          Press keys together, release in reverse
+  repeat <name> <n>       Press a key n times
+  type <text>             Type text, or "-" to read stdin
+
+Mouse
+  move <x> <y> [time]     Move the pointer to x, y, gliding over time if given
+  moveby <dx> <dy> [time] Move the pointer by dx, dy
+  click [button] [n]      Click n times (default: left, once)
+  mousedown [button]      Press a button and hold it
+  mouseup [button]        Release a held button
+  scroll <down> [right]   Scroll by notches; negative values go up and left
+
+Other
+  wait <time>             Pause
+  run <file>              Insert the actions from a macro JSON file, or "-" for stdin
+  list                    Print the key names this platform accepts
+
+Buttons are left, right, middle, back and forward.
 
 Options
-  -u, --unit <ms|us>    Unit for every number (default: ms)
-  -d, --delay <n>       Delay before each action starts
-  -i, --interval <n>    Gap between repeated actions
-  -t, --duration <n>    How long a single key is held
-  -k, --hotkey-delay <n>  How long a combination is held
-  -n, --times <n>       Run the whole chain n times
-      --dry-run         Print the compiled actions as JSON, send nothing
-  -h, --help            Show this help
-  -v, --version         Show the version
+  -u, --unit <ms|us>      Unit for every time (default: ms)
+  -d, --delay <time>      Delay before each action starts
+  -i, --interval <time>   Gap between repeated actions
+  -t, --duration <time>   How long a key or button is held
+  -k, --hotkey-delay <time>  How long a combination is held
+  -n, --times <n>         Run the whole chain n times
+      --dry-run           Print the compiled actions as JSON, send nothing
+  -h, --help              Show this help
+  -v, --version           Show the version
 
 Examples
   kimetra key enter
   kimetra hotkey ctrl+shift+escape
   kimetra type "hello" key enter
   kimetra hotkey alt+tab wait 200 type "hi" key enter
-  kimetra repeat down 5 --interval 50
+  kimetra move 800 400 click
+  kimetra mousedown move 600 400 300 mouseup
   echo "some text" | kimetra type -
   kimetra --dry-run hotkey ctrl+a type "hi" > macro.json && kimetra run macro.json
 
-Numbers are milliseconds unless --unit us is given.`;
+Times are milliseconds unless --unit us is given.`;
 
 /** A mistake in the command line itself, as opposed to a failure while running. */
 class UsageError extends Error {}
 
 // Command words. `keys` reads key names until the next one of these.
-const COMMANDS = new Set(['key', 'keys', 'hotkey', 'repeat', 'type', 'wait', 'run', 'list']);
+const COMMANDS = new Set([
+    'key', 'keys', 'hotkey', 'repeat', 'type',
+    'move', 'moveby', 'click', 'mousedown', 'mouseup', 'scroll',
+    'wait', 'run', 'list'
+]);
+
+const BUTTONS = ['left', 'right', 'middle', 'back', 'forward'];
+
+const isNumber = token => token.trim() !== '' && Number.isFinite(Number(token));
+const isButton = token => BUTTONS.includes(token);
 
 function number(raw, name) {
     const value = Number(raw);
@@ -58,6 +80,13 @@ function number(raw, name) {
         throw new UsageError(`${name} must be a non-negative number, received "${raw}".`);
     }
     return value;
+}
+
+function coordinate(raw, name) {
+    if (!isNumber(raw)) {
+        throw new UsageError(`${name} must be a number, received "${raw}".`);
+    }
+    return Number(raw);
 }
 
 function count(raw, name) {
@@ -141,6 +170,14 @@ function parse(argv) {
         return argv[++i];
     };
 
+    // An optional argument, taken only when the next token is not a command and fits.
+    const maybe = fits => {
+        const peek = argv[i + 1];
+        if (peek === undefined || COMMANDS.has(peek) || !fits(peek)) return undefined;
+        i++;
+        return peek;
+    };
+
     for (; i < argv.length; i++) {
         const token = argv[i];
 
@@ -187,6 +224,40 @@ function parse(argv) {
             case 'type': {
                 const text = next(token, 'some text');
                 actions.push({ type: 'text', text: text === '-' ? chomp(readStdin('type')) : text });
+                continue;
+            }
+            case 'move':
+            case 'moveby': {
+                const x = coordinate(next(token, 'x and y'), `${token} x`);
+                const y = coordinate(next(token, 'x and y'), `${token} y`);
+                const time = maybe(isNumber);
+                const action = { type: token, x, y };
+                if (time !== undefined) action.duration = number(time, `${token} time`);
+                actions.push(action);
+                continue;
+            }
+            case 'click': {
+                const action = { type: 'click' };
+                const name = maybe(isButton);
+                const times = maybe(isNumber);
+                if (name !== undefined) action.button = name;
+                if (times !== undefined) action.count = count(times, 'click');
+                actions.push(action);
+                continue;
+            }
+            case 'mousedown':
+            case 'mouseup': {
+                const action = { type: token };
+                const name = maybe(isButton);
+                if (name !== undefined) action.button = name;
+                actions.push(action);
+                continue;
+            }
+            case 'scroll': {
+                const action = { type: 'scroll', y: coordinate(next(token, 'an amount'), 'scroll') };
+                const right = maybe(isNumber);
+                if (right !== undefined) action.x = Number(right);
+                actions.push(action);
                 continue;
             }
             case 'wait':

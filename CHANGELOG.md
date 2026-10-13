@@ -4,9 +4,27 @@
 
 ### Added
 
+- Mouse support: `moveMouse`, `moveMouseBy`, `click`, `mouseDown`, `mouseUp`,
+  `scroll` and `mousePosition`, with matching sequence actions and CLI commands
+  (`move`, `moveby`, `click`, `mousedown`, `mouseup`, `scroll`). Keyboard and mouse
+  actions mix in one batch.
+- Moves can glide over a duration: a point every 4 ms, timed natively in one call.
+- Coordinates are physical pixels on Windows whatever the display scaling, and
+  points on macOS. On Linux only relative moves are available for now.
+- `Kimacro` has every action method, including `keyDown` and `keyUp`.
 - `down` and `up` sequence actions, matching `keyDown` and `keyUp`.
+- `npm run bench`, with a script that runs the same editing session through
+  Kimetra, robotjs and nut.js. See `bench/README.md`.
+
+### Fixed
+
+- Key names inherited from `Object.prototype`, such as `constructor`, were accepted
+  as keys and sent key code 0. They now throw like any unknown key.
 
 ### Changed
+
+- Linux creates its virtual keyboard and pointer only when first used, so a
+  keyboard-only script no longer pays for the pointer device, and the reverse.
 
 - Hotkeys no longer wait one gap after the last key-up, which saves 1 ms per
   hotkey. Key order and the hold before release are unchanged.

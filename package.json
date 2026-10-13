@@ -1,7 +1,7 @@
 {
     "name": "kimetra",
     "version": "2.1.1",
-    "description": "Keyboard automation for Node.js on Windows, macOS and Linux (X11 and Wayland). Prebuilt, zero dependencies.",
+    "description": "Keyboard and mouse automation for Node.js on Windows, macOS and Linux (X11 and Wayland). Prebuilt, zero dependencies.",
     "main": "./src/kimetra.js",
     "types": "./index.d.ts",
     "bin": {
@@ -22,12 +22,14 @@
     },
     "scripts": {
         "test": "node scripts/test.js",
+        "bench": "node bench/bench.js",
         "prepack": "npm test",
         "postinstall": "node scripts/post-install.js"
     },
     "keywords": [
         "kimetra",
         "keyboard",
+        "mouse",
         "automation",
         "keystroke",
         "hotkeys",

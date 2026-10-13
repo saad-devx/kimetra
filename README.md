@@ -7,12 +7,12 @@
 
 ![Banner](https://raw.githubusercontent.com/saad-devx/kimetra/refs/heads/main/src/assets/banner.jpg)
 
-Keyboard automation for Node.js, calling the OS input APIs directly through a
-precompiled native addon: `SendInput` on Windows, `CGEvent` on macOS, `uinput`
-on Linux.
+Keyboard and mouse automation for Node.js, calling the OS input APIs directly
+through a precompiled native addon: `SendInput` on Windows, `CGEvent` on macOS,
+`uinput` on Linux.
 
 - **Works on Wayland.** `uinput` reaches every app on Linux, on both X11 and Wayland.
-- **One native call per sequence.** JavaScript never runs between key events.
+- **One native call per sequence.** JavaScript never runs between input events.
 - **Microsecond timing.** Waits target an absolute deadline instead of drifting.
 - **No dependencies, no build step.** One binary per platform, under 150 KB installed.
 - **The same key names everywhere.** `ctrl` is `ctrl` on all three platforms.
@@ -37,6 +37,7 @@ await ki.pressKey('enter');
 await ki.pressHotkey(['ctrl', 'c']);
 await ki.pressKeys(['a', 'b', 'c']);
 await ki.typeText('Hello from Kimetra');
+await ki.click();
 
 ki.cleanup();
 ```
@@ -68,22 +69,28 @@ kimetra hotkey alt+tab wait 200 type "hi" key enter
 | `hotkey <a+b+c>` | Press keys together |
 | `repeat <name> <n>` | Press a key n times |
 | `type <text>` | Type text, or `-` to read stdin |
-| `wait <n>` | Pause |
+| `move <x> <y> [time]` | Move the pointer to x, y, gliding over `time` if given |
+| `moveby <dx> <dy> [time]` | Move the pointer by dx, dy |
+| `click [button] [n]` | Click n times (default: left, once) |
+| `mousedown [button]`, `mouseup [button]` | Press and hold a button, release it |
+| `scroll <down> [right]` | Scroll by notches; negative values go up and left |
+| `wait <time>` | Pause |
 | `run <file>` | Insert the actions from a macro file, or `-` for stdin |
 | `list` | Print the key names this platform accepts |
 
 | Option | Does |
 | --- | --- |
-| `-u, --unit <ms\|us>` | Unit for every number you pass (default `ms`) |
-| `-d, --delay <n>` | Delay before each action starts |
-| `-i, --interval <n>` | Gap between repeated actions |
-| `-t, --duration <n>` | How long a single key is held |
-| `-k, --hotkey-delay <n>` | How long a combination is held |
+| `-u, --unit <ms\|us>` | Unit for every time you pass (default `ms`) |
+| `-d, --delay <time>` | Delay before each action starts |
+| `-i, --interval <time>` | Gap between repeated actions |
+| `-t, --duration <time>` | How long a key or button is held |
+| `-k, --hotkey-delay <time>` | How long a combination is held |
 | `-n, --times <n>` | Run the whole chain n times |
 | `--dry-run` | Print the compiled actions as JSON, send nothing |
 
-**Numbers are milliseconds here**, not microseconds. A terminal is not the place
-to think in microseconds; pass `--unit us` if you need to.
+**Times are milliseconds here**, not microseconds. A terminal is not the place
+to think in microseconds; pass `--unit us` if you need to. Coordinates are never
+scaled.
 
 `--dry-run` writes the same JSON that `Kimacro` does, so the two are
 interchangeable:
@@ -187,7 +194,7 @@ const ki = Kimetra({
   unit: 'microsecond', // 'microsecond' (default) or 'millisecond'
   delay: 0,            // delay before an action starts
   interval: 700,       // gap between repeated actions
-  duration: 700,       // how long a single key is held
+  duration: 700,       // how long a key or mouse button is held
   hotkeyDelay: 1500    // how long a combination is held before release
 });
 ```
@@ -202,6 +209,7 @@ const ki = Kimetra({
 | `keyDown(key, delay?)` | Press a key down and leave it held. |
 | `keyUp(key, delay?)` | Release a held key. |
 | `sleep(duration)` | Block for `duration`. |
+| `mousePosition()` | The pointer position as `{ x, y }`. See [mouse](#mouse). |
 | `executeSequence(actions[])` | Run a list of actions as one batch. |
 | `cleanup()` | Release native resources. Safe to call more than once. |
 
@@ -252,6 +260,47 @@ await ki.pressKey('meta');
 await ki.repeatKey('tab', 3);
 ```
 
+### Mouse
+
+```javascript
+await ki.moveMouse(800, 400);            // move to x, y
+await ki.moveMouse(800, 400, 250000);    // glide there over 250 ms (microsecond mode)
+await ki.moveMouseBy(40, 0);             // move relative to where the pointer is
+await ki.click();                        // left click
+await ki.click('right', 2);              // double click with the right button
+await ki.scroll(3);                      // 3 notches down; negative scrolls up
+
+await ki.mouseDown();                    // drag: press, move, release
+await ki.moveMouse(600, 300, 200000);
+await ki.mouseUp();
+
+const { x, y } = ki.mousePosition();
+```
+
+| Method | Description |
+| --- | --- |
+| `moveMouse(x, y, duration?, delay?)` | Move the pointer to x, y. With `duration`, glide there in steps 4 ms apart. |
+| `moveMouseBy(x, y, duration?, delay?)` | Move the pointer by x, y. |
+| `click(button?, count?, delay?)` | Click `count` times. Defaults to one left click. |
+| `mouseDown(button?, delay?)` | Press a button and leave it held. |
+| `mouseUp(button?, delay?)` | Release a held button. |
+| `scroll(y, x?, delay?)` | Scroll `y` notches down and `x` notches right. Negative values go up and left. |
+
+Buttons are `left`, `right`, `middle`, `back` and `forward`. A click holds the button
+for `duration` and spaces the clicks of a double click by `interval`, like keys.
+
+Coordinates are in each OS's own units: physical pixels on Windows, whatever the
+display scaling, and points on macOS, where one point is two pixels on a Retina
+display. They span every monitor, with (0, 0) at the top left of the main one.
+
+Relative moves go through the OS pointer speed and acceleration settings, as a real
+mouse does, so `moveMouseBy(100, 0)` can move the cursor more or less than 100
+pixels. Games that read raw mouse input receive the exact amounts.
+
+On Linux, `moveMouse` and `mousePosition` are not available yet, because `uinput`
+cannot see the pointer or the screen layout. Relative moves, clicks and scrolling
+work, on X11 and Wayland.
+
 ### Sequences
 
 A sequence compiles into one native call, which makes it the fastest way to run
@@ -264,7 +313,8 @@ await ki.executeSequence([
   { type: 'text', text: 'Sequence text' },
   { type: 'key', key: 'enter' },
   { type: 'repeat', key: 'down', times: 3, interval: 1000 },
-  { type: 'keys', keys: ['a', 'b'], interval: 2000 }
+  { type: 'keys', keys: ['a', 'b'], interval: 2000 },
+  { type: 'click', button: 'left' }
 ]);
 ```
 
@@ -276,6 +326,10 @@ await ki.executeSequence([
 | `repeat` | `key`, `times`, `interval?`, `delay?` |
 | `text` | `text`, `delay?` |
 | `down` / `up` | `key`, `delay?` |
+| `move` / `moveby` | `x`, `y`, `duration?`, `delay?` |
+| `click` | `button?`, `count?`, `delay?` |
+| `mousedown` / `mouseup` | `button?`, `delay?` |
+| `scroll` | `y`, `x?`, `delay?` |
 | `wait` | `duration` |
 
 Every method above is a one-action sequence, so a method call and the matching
@@ -303,8 +357,8 @@ fs.writeFileSync('login.json', JSON.stringify(macro.toJSON()));
 await Kimacro().fromJSON(JSON.parse(fs.readFileSync('login.json'))).exec();
 ```
 
-`Kimacro` takes the same options as `Kimetra`, and also has `add(action)`,
-`clear()` and `cleanup()`.
+`Kimacro` takes the same options as `Kimetra` and has every action method above,
+plus `wait(duration)`, `add(action)`, `clear()` and `cleanup()`.
 
 ### Low level access
 
@@ -321,7 +375,8 @@ ki.core.Sleep(500);
 ki.core.KeyUp(Key.enter);
 ```
 
-`core` exposes `KeyDown`, `KeyUp`, `SendString`, `Sleep`, `Run` and `Cleanup`.
+`core` exposes `KeyDown`, `KeyUp`, `SendString`, `Sleep`, `Run`, `MousePosition` and
+`Cleanup`.
 `Sleep` is more accurate than `setTimeout` and avoids the scheduling overhead of
 returning to the event loop.
 

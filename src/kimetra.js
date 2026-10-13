@@ -4,17 +4,27 @@ const OS = process.platform;
 const ARCH = process.arch;
 
 // Batch layout: [op, a, b] int32 records, mirrored in src/cpp/backend.h.
-const BATCH_FORMAT = 2;
+const BATCH_FORMAT = 3;
 const OP_DOWN = 0;
 const OP_UP = 1;
 const OP_SLEEP = 2;
 const OP_TEXT = 3;
+const OP_MOVE = 4;
+const OP_BUTTON_DOWN = 5;
+const OP_BUTTON_UP = 6;
+const OP_SCROLL = 7;
+const OP_MOVE_BY = 8;
+
+const BUTTONS = { left: 0, right: 1, middle: 2, back: 3, forward: 4 };
 
 // Gap between key events of a combination, so apps register a modifier in time.
 const KEY_GAP = 1000;
 
+// Interval between the points of a smooth pointer move (250 per second).
+const MOVE_STEP = 4000;
+
 // Batch slots are int32.
-const MAX_MICROS = 2147483647;
+const MAX_INT32 = 2147483647;
 const MAX_KEYCODE = 65535;
 
 const TARGETS = 'win32-x64, win32-ia32, darwin-x64, darwin-arm64, linux-x64, linux-ia32';
@@ -23,6 +33,10 @@ const REJECTED = OS === 'win32'
     ? 'The OS rejected the input. The focused window is most likely running elevated, ' +
       'in which case this process has to run elevated as well.'
     : 'The OS rejected the input.';
+
+const NO_LINUX_POSITION =
+    'is not available on Linux yet: uinput cannot see the pointer or the screen layout. ' +
+    'Use moveMouseBy for relative moves.';
 
 function loadKeymap() {
     try {
@@ -47,9 +61,23 @@ function loadBinary() {
 const Key = Object.freeze(loadKeymap());
 const Binary = loadBinary();
 
+/** Refuses a binary built for another batch layout, rather than letting it misread one. */
+function checkBinary() {
+    if (Binary.Format !== BATCH_FORMAT) {
+        throw new Error(
+            `The Kimetra binary for ${OS}-${ARCH} is out of date. Reinstall kimetra, ` +
+            'or rebuild it from source.'
+        );
+    }
+}
+
 /** Formats a rejected value for an error message. */
 function describe(value) {
     return typeof value === 'string' ? JSON.stringify(value) : String(value);
+}
+
+function has(object, name) {
+    return Object.prototype.hasOwnProperty.call(object, name);
 }
 
 /** Resolves a key name to its platform code. Raw codes pass through unchanged. */
@@ -63,11 +91,10 @@ function code(key) {
         return key;
     }
 
-    const resolved = Key[key];
-    if (resolved === undefined) {
+    if (!has(Key, key)) {
         throw new Error(`Unknown key "${key}" on ${OS}.`);
     }
-    return resolved;
+    return Key[key];
 }
 
 function codes(keys, type) {
@@ -77,11 +104,28 @@ function codes(keys, type) {
     return keys.map(code);
 }
 
-function count(times) {
+function checkCount(times, type) {
     if (!Number.isInteger(times) || times < 0) {
-        throw new TypeError(`repeat needs a whole number of times, received ${describe(times)}.`);
+        throw new TypeError(`${type} needs a whole number of times, received ${describe(times)}.`);
     }
     return times;
+}
+
+function buttonId(name = 'left') {
+    if (!has(BUTTONS, name)) {
+        throw new Error(
+            `Unknown mouse button ${describe(name)}. Use left, right, middle, back or forward.`
+        );
+    }
+    return BUTTONS[name];
+}
+
+/** Coordinates and scroll amounts: any finite number, rounded to a whole one. */
+function whole(value, name) {
+    if (typeof value !== 'number' || !Number.isFinite(value) || Math.abs(value) > MAX_INT32) {
+        throw new TypeError(`${name} must be a finite number, received ${describe(value)}.`);
+    }
+    return Math.round(value);
 }
 
 // Resolved to key codes once, at load.
@@ -103,6 +147,37 @@ for (const name of Object.keys(SHORTCUTS)) {
     SHORTCUTS[name] = codes(SHORTCUTS[name], name);
 }
 
+// Every action method returns one action. Kimetra runs it as a one-action sequence,
+// Kimacro records it, so both share these signatures and all validation is in _compile.
+const ACTIONS = {
+    /** Presses a key down and leaves it held. */
+    keyDown: (key, delay) => ({ type: 'down', key, delay }),
+    /** Releases a held key. */
+    keyUp: (key, delay) => ({ type: 'up', key, delay }),
+    /** Presses and releases a key, holding it down for `duration`. */
+    pressKey: (key, duration, delay) => ({ type: 'key', key, duration, delay }),
+    /** Presses several keys one after another. */
+    pressKeys: (keys, interval, delay) => ({ type: 'keys', keys, interval, delay }),
+    /** Presses keys together as a combination, releasing them in reverse order. */
+    pressHotkey: (keys, duration, delay) => ({ type: 'hotkey', keys, duration, delay }),
+    /** Presses the same key `times` times. */
+    repeatKey: (key, times, interval, delay) => ({ type: 'repeat', key, times, interval, delay }),
+    /** Types text. Unicode is supported on Windows and macOS. */
+    typeText: (text, delay) => ({ type: 'text', text, delay }),
+    /** Moves the pointer to (x, y), gliding there over `duration` when one is given. */
+    moveMouse: (x, y, duration, delay) => ({ type: 'move', x, y, duration, delay }),
+    /** Moves the pointer by (x, y), gliding over `duration` when one is given. */
+    moveMouseBy: (x, y, duration, delay) => ({ type: 'moveby', x, y, duration, delay }),
+    /** Clicks a button `count` times (default once). */
+    click: (button, count, delay) => ({ type: 'click', button, count, delay }),
+    /** Presses a mouse button down and leaves it held. */
+    mouseDown: (button, delay) => ({ type: 'mousedown', button, delay }),
+    /** Releases a held mouse button. */
+    mouseUp: (button, delay) => ({ type: 'mouseup', button, delay }),
+    /** Scrolls `y` notches down and `x` notches right; negative values go up and left. */
+    scroll: (y, x, delay) => ({ type: 'scroll', y, x, delay })
+};
+
 class Kimetra {
     constructor(options) {
         const opts = options || {};
@@ -123,43 +198,8 @@ class Kimetra {
         this._ops = new Int32Array(64);
         this._len = 0;
         this._texts = [];
-    }
-
-    // Each method is a one-action sequence; validation lives in _compile.
-
-    /** Presses a key down and leaves it held. */
-    keyDown(key, delay) {
-        return this.executeSequence([{ type: 'down', key, delay }]);
-    }
-
-    /** Releases a held key. */
-    keyUp(key, delay) {
-        return this.executeSequence([{ type: 'up', key, delay }]);
-    }
-
-    /** Presses and releases a key, holding it down for `duration`. */
-    pressKey(key, duration, delay) {
-        return this.executeSequence([{ type: 'key', key, duration, delay }]);
-    }
-
-    /** Presses several keys one after another. */
-    pressKeys(keys, interval, delay) {
-        return this.executeSequence([{ type: 'keys', keys, interval, delay }]);
-    }
-
-    /** Presses keys together as a combination, releasing them in reverse order. */
-    pressHotkey(keys, duration, delay) {
-        return this.executeSequence([{ type: 'hotkey', keys, duration, delay }]);
-    }
-
-    /** Presses the same key `times` times. */
-    repeatKey(key, times, interval, delay) {
-        return this.executeSequence([{ type: 'repeat', key, times, interval, delay }]);
-    }
-
-    /** Types text. Unicode is supported on Windows and macOS. */
-    typeText(text, delay) {
-        return this.executeSequence([{ type: 'text', text, delay }]);
+        this._at = null;
+        this._shift = { x: 0, y: 0 };
     }
 
     /** Blocks for `duration` with microsecond accuracy. */
@@ -170,6 +210,16 @@ class Kimetra {
 
         Binary.Sleep(this._us(duration, 0, 'sleep duration'));
         return true;
+    }
+
+    /** Reads the pointer position, in the OS's own units. Not available on Linux yet. */
+    mousePosition() {
+        if (OS === 'linux') throw new Error(`mousePosition ${NO_LINUX_POSITION}`);
+        checkBinary();
+
+        const point = Binary.MousePosition();
+        if (!point) throw new Error('The OS did not report the pointer position.');
+        return point;
     }
 
     /** Compiles an entire action list into a single native call. */
@@ -200,6 +250,9 @@ class Kimetra {
     }
 
     _compile(actions) {
+        this._at = null;
+        this._shift = { x: 0, y: 0 };
+
         for (const action of actions) {
             const delay = this._us(action.delay, this.delay, 'delay');
 
@@ -227,7 +280,7 @@ class Kimetra {
                     break;
                 case 'repeat':
                     this._buildSeries(
-                        new Array(count(action.times)).fill(code(action.key)),
+                        new Array(checkCount(action.times, 'repeat')).fill(code(action.key)),
                         this._us(action.interval, this.interval, 'interval'),
                         delay
                     );
@@ -248,6 +301,40 @@ class Kimetra {
                     }
                     this._push(OP_SLEEP, this._us(action.duration, 0, 'wait duration'));
                     break;
+                case 'move':
+                case 'moveby':
+                    if (action.type === 'move' && OS === 'linux') {
+                        throw new Error(`Moving to absolute coordinates ${NO_LINUX_POSITION}`);
+                    }
+                    this._buildMove(
+                        action.type === 'moveby',
+                        whole(action.x, 'x'),
+                        whole(action.y, 'y'),
+                        this._us(action.duration, 0, 'duration'),
+                        delay
+                    );
+                    break;
+                case 'click':
+                    this._buildClick(
+                        buttonId(action.button),
+                        action.count === undefined ? 1 : checkCount(action.count, 'click'),
+                        delay
+                    );
+                    break;
+                case 'mousedown':
+                case 'mouseup': {
+                    const id = buttonId(action.button);
+                    if (delay > 0) this._push(OP_SLEEP, delay);
+                    this._push(action.type === 'mousedown' ? OP_BUTTON_DOWN : OP_BUTTON_UP, id, 1);
+                    break;
+                }
+                case 'scroll': {
+                    const y = whole(action.y, 'y');
+                    const x = action.x === undefined ? 0 : whole(action.x, 'x');
+                    if (delay > 0) this._push(OP_SLEEP, delay);
+                    if (y || x) this._push(OP_SCROLL, y, x);
+                    break;
+                }
                 default:
                     throw new Error(`Unknown action type "${action.type}".`);
             }
@@ -262,10 +349,10 @@ class Kimetra {
         }
 
         const micros = value * this._scale;
-        if (micros > MAX_MICROS) {
+        if (micros > MAX_INT32) {
             throw new RangeError(
                 `${name} of ${value} exceeds the maximum of ` +
-                `${Math.floor(MAX_MICROS / this._scale)} ${this.unit}s.`
+                `${Math.floor(MAX_INT32 / this._scale)} ${this.unit}s.`
             );
         }
         return micros;
@@ -309,7 +396,7 @@ class Kimetra {
             this._push(OP_DOWN, keyCodes[i]);
         }
 
-        if (n > 0) this._push(OP_SLEEP, Math.min(KEY_GAP + duration, MAX_MICROS));
+        if (n > 0) this._push(OP_SLEEP, Math.min(KEY_GAP + duration, MAX_INT32));
 
         for (let i = n - 1; i >= 0; i--) {
             this._push(OP_UP, keyCodes[i]);
@@ -327,22 +414,72 @@ class Kimetra {
         this._push(OP_TEXT, this._texts.length - 1);
     }
 
+    // A glide is a point every MOVE_STEP, with waits that add up to `duration` exactly.
+    _buildMove(relative, x, y, duration, delay) {
+        if (delay > 0) this._push(OP_SLEEP, delay);
+
+        const steps = Math.max(1, Math.round(duration / MOVE_STEP));
+        const from = relative ? { x: 0, y: 0 } : steps > 1 ? this._pointer() : { x, y };
+        let lastX = from.x;
+        let lastY = from.y;
+        let waited = 0;
+
+        for (let i = 1; i <= steps; i++) {
+            const wait = Math.round((duration * i) / steps) - waited;
+            if (wait > 0) this._push(OP_SLEEP, wait);
+            waited += wait;
+
+            const px = Math.round(from.x + ((x - from.x) * i) / steps);
+            const py = Math.round(from.y + ((y - from.y) * i) / steps);
+            if (relative) {
+                if (px !== lastX || py !== lastY) this._push(OP_MOVE_BY, px - lastX, py - lastY);
+            } else if (i === steps || px !== lastX || py !== lastY) {
+                this._push(OP_MOVE, px, py);
+            }
+            lastX = px;
+            lastY = py;
+        }
+
+        if (!relative) {
+            this._at = { x, y };
+        } else if (this._at) {
+            this._at = { x: this._at.x + x, y: this._at.y + y };
+        } else {
+            this._shift.x += x;
+            this._shift.y += y;
+        }
+    }
+
+    // Where the pointer will be at this point of the batch: read from the OS once, when
+    // a glide first needs it, plus any relative moves compiled before that.
+    _pointer() {
+        if (!this._at) {
+            const now = this.mousePosition();
+            this._at = { x: now.x + this._shift.x, y: now.y + this._shift.y };
+        }
+        return this._at;
+    }
+
+    // Each press of a multi-click carries its number; macOS needs it to see a double click.
+    _buildClick(id, times, delay) {
+        if (delay > 0) this._push(OP_SLEEP, delay);
+        for (let i = 1; i <= times; i++) {
+            if (i > 1 && this.interval > 0) this._push(OP_SLEEP, this.interval);
+            this._push(OP_BUTTON_DOWN, id, i);
+            if (this.duration > 0) this._push(OP_SLEEP, this.duration);
+            this._push(OP_BUTTON_UP, id, i);
+        }
+    }
+
     /** Hands the whole batch to native in one call and resets the buffer. */
     _run() {
         const length = this._len;
         const texts = this._texts;
         this._len = 0;
 
-        if (Binary.Format !== BATCH_FORMAT) {
-            texts.length = 0;
-            throw new Error(
-                `The Kimetra binary for ${OS}-${ARCH} is out of date. Reinstall kimetra, ` +
-                'or rebuild it from source.'
-            );
-        }
-
         let ok;
         try {
+            checkBinary();
             ok = Binary.Run(this._ops, length, texts);
         } finally {
             texts.length = 0;
@@ -351,14 +488,6 @@ class Kimetra {
         if (ok === false) throw new Error(REJECTED);
         return true;
     }
-}
-
-// Editing shortcuts: Cmd on macOS, Ctrl elsewhere.
-for (const name of Object.keys(SHORTCUTS)) {
-    const keys = SHORTCUTS[name];
-    Kimetra.prototype[name] = function (duration, delay) {
-        return this.pressHotkey(keys, duration, delay);
-    };
 }
 
 class Kimacro {
@@ -380,26 +509,6 @@ class Kimacro {
 
         this.sequence.push(copy);
         return this;
-    }
-
-    pressKey(key, duration, delay) {
-        return this.add({ type: 'key', key, duration, delay });
-    }
-
-    pressKeys(keys, interval, delay) {
-        return this.add({ type: 'keys', keys, interval, delay });
-    }
-
-    pressHotkey(keys, duration, delay) {
-        return this.add({ type: 'hotkey', keys, duration, delay });
-    }
-
-    repeatKey(key, times, interval, delay) {
-        return this.add({ type: 'repeat', key, times, interval, delay });
-    }
-
-    typeText(text, delay) {
-        return this.add({ type: 'text', text, delay });
     }
 
     wait(duration) {
@@ -431,6 +540,24 @@ class Kimacro {
     cleanup() {
         this.ki.cleanup();
     }
+}
+
+for (const name of Object.keys(ACTIONS)) {
+    const action = ACTIONS[name];
+    Kimetra.prototype[name] = function (...args) {
+        return this.executeSequence([action(...args)]);
+    };
+    Kimacro.prototype[name] = function (...args) {
+        return this.add(action(...args));
+    };
+}
+
+// Editing shortcuts: Cmd on macOS, Ctrl elsewhere.
+for (const name of Object.keys(SHORTCUTS)) {
+    const keys = SHORTCUTS[name];
+    Kimetra.prototype[name] = function (duration, delay) {
+        return this.pressHotkey(keys, duration, delay);
+    };
 }
 
 module.exports = {

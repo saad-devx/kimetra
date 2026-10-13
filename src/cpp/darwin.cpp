@@ -1,6 +1,7 @@
 #include <mach/mach_time.h>
 #include <ApplicationServices/ApplicationServices.h>
 #include <CoreGraphics/CoreGraphics.h>
+#include <cmath>
 #include <vector>
 
 #include "backend.h"
@@ -23,6 +24,9 @@ namespace
 
     // Held modifiers, stamped on every event; macOS doesn't derive them itself.
     CGEventFlags g_flags = 0;
+
+    // Held mouse buttons, so moves are posted as drags while one is down.
+    unsigned g_buttons = 0;
 
     CGEventFlags FlagFor(int code) noexcept
     {
@@ -59,6 +63,38 @@ namespace
         CGEventPost(kCGHIDEventTap, up);
         CFRelease(up);
 
+        return true;
+    }
+
+    bool Location(CGPoint &point) noexcept
+    {
+        CGEventRef event = CGEventCreate(nullptr);
+        if (!event)
+            return false;
+        point = CGEventGetLocation(event);
+        CFRelease(event);
+        return true;
+    }
+
+    // Button numbers in backend.h match CGMouseButton: 0 left, 1 right, 2 centre, 3 and 4 other.
+    bool PostMouse(CGEventType type, CGPoint point, int button, int clicks, int dx, int dy) noexcept
+    {
+        CGEventRef event = CGEventCreateMouseEvent(nullptr, type, point, static_cast<CGMouseButton>(button));
+        if (!event)
+            return false;
+
+        if (clicks > 0)
+            CGEventSetIntegerValueField(event, kCGMouseEventClickState, clicks);
+        if (dx || dy)
+        {
+            CGEventSetIntegerValueField(event, kCGMouseEventDeltaX, dx);
+            CGEventSetIntegerValueField(event, kCGMouseEventDeltaY, dy);
+        }
+        if (g_flags)
+            CGEventSetFlags(event, g_flags);
+
+        CGEventPost(kCGHIDEventTap, event);
+        CFRelease(event);
         return true;
     }
 }
@@ -138,6 +174,92 @@ namespace kimetra
         return ok;
     }
 
+    // Coordinates are points in the global display space, origin at the top left of
+    // the main display.
+    bool MoveMouse(int x, int y, bool relative) noexcept
+    {
+        CGPoint from;
+        if (!Location(from))
+            return false;
+        CGPoint to = relative ? CGPointMake(from.x + x, from.y + y) : CGPointMake(x, y);
+
+        CGEventType type = kCGEventMouseMoved;
+        int button = BUTTON_LEFT;
+        if (g_buttons & (1u << BUTTON_LEFT))
+        {
+            type = kCGEventLeftMouseDragged;
+        }
+        else if (g_buttons & (1u << BUTTON_RIGHT))
+        {
+            type = kCGEventRightMouseDragged;
+            button = BUTTON_RIGHT;
+        }
+        else if (g_buttons)
+        {
+            type = kCGEventOtherMouseDragged;
+            button = BUTTON_MIDDLE;
+            while (!(g_buttons & (1u << button)))
+                button++;
+        }
+
+        return PostMouse(type, to, button, 0,
+                         static_cast<int>(std::lround(to.x - from.x)),
+                         static_cast<int>(std::lround(to.y - from.y)));
+    }
+
+    // macOS does not infer double clicks for posted events, so the count is set on each one.
+    bool SendButton(int button, bool down, int clicks) noexcept
+    {
+        CGEventType type;
+        switch (button)
+        {
+        case BUTTON_LEFT:
+            type = down ? kCGEventLeftMouseDown : kCGEventLeftMouseUp;
+            break;
+        case BUTTON_RIGHT:
+            type = down ? kCGEventRightMouseDown : kCGEventRightMouseUp;
+            break;
+        case BUTTON_MIDDLE:
+        case BUTTON_BACK:
+        case BUTTON_FORWARD:
+            type = down ? kCGEventOtherMouseDown : kCGEventOtherMouseUp;
+            break;
+        default:
+            return false;
+        }
+
+        CGPoint at;
+        if (!Location(at))
+            return false;
+
+        unsigned bit = 1u << button;
+        g_buttons = down ? (g_buttons | bit) : (g_buttons & ~bit);
+        return PostMouse(type, at, button, clicks, 0, 0);
+    }
+
+    // macOS counts positive scroll as up and left, the opposite of `down` and `right`.
+    bool Scroll(int down, int right) noexcept
+    {
+        CGEventRef event = CGEventCreateScrollWheelEvent(nullptr, kCGScrollEventUnitLine, 2, -down, -right);
+        if (!event)
+            return false;
+        if (g_flags)
+            CGEventSetFlags(event, g_flags);
+        CGEventPost(kCGHIDEventTap, event);
+        CFRelease(event);
+        return true;
+    }
+
+    bool MousePosition(int &x, int &y) noexcept
+    {
+        CGPoint point;
+        if (!Location(point))
+            return false;
+        x = static_cast<int>(std::lround(point.x));
+        y = static_cast<int>(std::lround(point.y));
+        return true;
+    }
+
     void PreciseSleep(int micros) noexcept
     {
         if (micros < 1)
@@ -164,5 +286,6 @@ namespace kimetra
     void Release() noexcept
     {
         g_flags = 0;
+        g_buttons = 0;
     }
 }

@@ -22,43 +22,74 @@ namespace
         "  sudo usermod -aG input $USER\n"
         "Then reboot, or run the process as root.";
 
-    int g_fd = -1;
+    int g_keyboard = -1;
+    int g_pointer = -1;
 
-    int GetDevice() noexcept
+    // Creates a virtual device. `declare` sets its event and key bits.
+    template <typename Declare>
+    int CreateDevice(const char *name, int product, Declare declare) noexcept
     {
-        if (g_fd >= 0)
-            return g_fd;
-
-        g_fd = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
-        if (g_fd < 0)
+        int fd = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
+        if (fd < 0)
             return -1;
-
-        if (ioctl(g_fd, UI_SET_EVBIT, EV_KEY) < 0 || ioctl(g_fd, UI_SET_EVBIT, EV_SYN) < 0)
-        {
-            close(g_fd);
-            g_fd = -1;
-            return -1;
-        }
-
-        // Declare the full key range so no mapped key is filtered.
-        for (int key = 1; key <= 255; key++)
-            ioctl(g_fd, UI_SET_KEYBIT, key);
 
         struct uinput_setup setup = {};
         setup.id.bustype = BUS_USB;
         setup.id.vendor = 0x1234;
-        setup.id.product = 0x5678;
-        strncpy(setup.name, "kimetra-virtual-keyboard", UINPUT_MAX_NAME_SIZE - 1);
+        setup.id.product = static_cast<__u16>(product);
+        strncpy(setup.name, name, UINPUT_MAX_NAME_SIZE - 1);
 
-        if (ioctl(g_fd, UI_DEV_SETUP, &setup) < 0 || ioctl(g_fd, UI_DEV_CREATE) < 0)
+        if (!declare(fd) || ioctl(fd, UI_DEV_SETUP, &setup) < 0 || ioctl(fd, UI_DEV_CREATE) < 0)
         {
-            close(g_fd);
-            g_fd = -1;
+            close(fd);
             return -1;
         }
 
         usleep(DEVICE_SETTLE_US);
-        return g_fd;
+        return fd;
+    }
+
+    int GetKeyboard() noexcept
+    {
+        if (g_keyboard < 0)
+            g_keyboard = CreateDevice("kimetra-virtual-keyboard", 0x5678, [](int fd) {
+                if (ioctl(fd, UI_SET_EVBIT, EV_KEY) < 0 || ioctl(fd, UI_SET_EVBIT, EV_SYN) < 0)
+                    return false;
+                // Declare the full key range so no mapped key is filtered.
+                for (int key = 1; key <= 255; key++)
+                    ioctl(fd, UI_SET_KEYBIT, key);
+                return true;
+            });
+        return g_keyboard;
+    }
+
+    const int BUTTON_CODES[] = {BTN_LEFT, BTN_RIGHT, BTN_MIDDLE, BTN_SIDE, BTN_EXTRA};
+
+    // A relative mouse, which is what libinput and games expect from a real one.
+    int GetPointer() noexcept
+    {
+        if (g_pointer < 0)
+            g_pointer = CreateDevice("kimetra-virtual-pointer", 0x5679, [](int fd) {
+                if (ioctl(fd, UI_SET_EVBIT, EV_KEY) < 0 || ioctl(fd, UI_SET_EVBIT, EV_REL) < 0 ||
+                    ioctl(fd, UI_SET_EVBIT, EV_SYN) < 0)
+                    return false;
+                for (int code : BUTTON_CODES)
+                    ioctl(fd, UI_SET_KEYBIT, code);
+                for (int axis : {REL_X, REL_Y, REL_WHEEL, REL_HWHEEL})
+                    ioctl(fd, UI_SET_RELBIT, axis);
+                return true;
+            });
+        return g_pointer;
+    }
+
+    void Destroy(int &fd) noexcept
+    {
+        if (fd >= 0)
+        {
+            ioctl(fd, UI_DEV_DESTROY);
+            close(fd);
+            fd = -1;
+        }
     }
 
     bool Emit(int fd, int type, int code, int value) noexcept
@@ -144,9 +175,10 @@ namespace kimetra
 {
     void Start() noexcept {}
 
+    // Devices are created on first use, so this only checks access.
     bool Ready(Napi::Env env)
     {
-        if (GetDevice() >= 0)
+        if (access("/dev/uinput", W_OK) == 0)
             return true;
 
         Napi::Error::New(env, PERMISSION_HINT).ThrowAsJavaScriptException();
@@ -155,7 +187,7 @@ namespace kimetra
 
     bool SendKey(int code, bool down) noexcept
     {
-        int fd = GetDevice();
+        int fd = GetKeyboard();
         if (fd < 0)
             return false;
 
@@ -165,7 +197,7 @@ namespace kimetra
 
     bool SendText(const std::u16string &text, std::string &error)
     {
-        int fd = GetDevice();
+        int fd = GetKeyboard();
         if (fd < 0)
             return false;
 
@@ -209,6 +241,48 @@ namespace kimetra
         return true;
     }
 
+    // Absolute moves need the screen layout, which uinput cannot see, so only
+    // relative moves are supported. src/kimetra.js never sends an absolute one here.
+    bool MoveMouse(int x, int y, bool relative) noexcept
+    {
+        int fd = relative ? GetPointer() : -1;
+        if (fd < 0)
+            return false;
+
+        return (x == 0 || Emit(fd, EV_REL, REL_X, x)) &&
+               (y == 0 || Emit(fd, EV_REL, REL_Y, y)) &&
+               Emit(fd, EV_SYN, SYN_REPORT, 0);
+    }
+
+    // Double clicks are detected from timing, so the click count is not needed.
+    bool SendButton(int button, bool down, int) noexcept
+    {
+        int fd = button >= BUTTON_LEFT && button <= BUTTON_FORWARD ? GetPointer() : -1;
+        if (fd < 0)
+            return false;
+
+        return Emit(fd, EV_KEY, BUTTON_CODES[button], down ? 1 : 0) &&
+               Emit(fd, EV_SYN, SYN_REPORT, 0);
+    }
+
+    // evdev counts positive wheel movement as up, the opposite of `down`.
+    bool Scroll(int down, int right) noexcept
+    {
+        int fd = GetPointer();
+        if (fd < 0)
+            return false;
+
+        return (down == 0 || Emit(fd, EV_REL, REL_WHEEL, -down)) &&
+               (right == 0 || Emit(fd, EV_REL, REL_HWHEEL, right)) &&
+               Emit(fd, EV_SYN, SYN_REPORT, 0);
+    }
+
+    // Neither uinput nor Wayland exposes the pointer position.
+    bool MousePosition(int &, int &) noexcept
+    {
+        return false;
+    }
+
     void PreciseSleep(int micros) noexcept
     {
         if (micros < 1)
@@ -237,11 +311,7 @@ namespace kimetra
 
     void Release() noexcept
     {
-        if (g_fd >= 0)
-        {
-            ioctl(g_fd, UI_DEV_DESTROY);
-            close(g_fd);
-            g_fd = -1;
-        }
+        Destroy(g_keyboard);
+        Destroy(g_pointer);
     }
 }

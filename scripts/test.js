@@ -18,23 +18,29 @@ const OP_DOWN = 0;
 const OP_UP = 1;
 const OP_SLEEP = 2;
 const OP_TEXT = 3;
+const OP_MOVE = 4;
+const OP_BUTTON_DOWN = 5;
+const OP_BUTTON_UP = 6;
+const OP_SCROLL = 7;
+const OP_MOVE_BY = 8;
+
+const LINUX = process.platform === 'linux';
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
 
 /**
- * Replaces the native call with a capture, so nothing reaches the OS. Ops are
- * reported as [op, a]; the third slot is asserted to be zero, since no op uses it yet.
+ * Replaces the native call with a capture, so nothing reaches the OS. `records` holds
+ * every op as [op, a, b]; `ops` drops the third slot, which key ops leave at zero.
  */
 function capture(ki) {
-    let ops = null;
+    let records = null;
     let texts = null;
 
     ki._run = function () {
-        ops = [];
+        records = [];
         for (let i = 0; i < this._len; i += 3) {
-            assert.strictEqual(this._ops[i + 2], 0, 'unused third slot must be zero');
-            ops.push([this._ops[i], this._ops[i + 1]]);
+            records.push([this._ops[i], this._ops[i + 1], this._ops[i + 2]]);
         }
         texts = this._texts.slice();
         this._len = 0;
@@ -42,8 +48,10 @@ function capture(ki) {
         return true;
     };
 
-    return () => ({ ops, texts });
+    return () => ({ ops: records.map(r => [r[0], r[1]]), records, texts });
 }
+
+const sum = (records, op) => records.filter(r => r[0] === op).reduce((total, r) => total + r[1], 0);
 
 // Entry points
 
@@ -124,6 +132,13 @@ test('millisecond unit scales per-call arguments', async () => {
 test('an unknown key name throws a useful error', async () => {
     const ki = Kimetra();
     await assert.rejects(() => ki.pressKey('entre'), /Unknown key "entre"/);
+});
+
+test('names inherited from Object.prototype are not keys', async () => {
+    const ki = Kimetra();
+    for (const name of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+        await assert.rejects(() => ki.pressKey(name), /Unknown key/, name);
+    }
 });
 
 test('a raw code from Key passes through', async () => {
@@ -335,7 +350,145 @@ test('redo uses the chord each platform expects', async () => {
     assert.deepStrictEqual(downs, expected);
 });
 
+// Mouse
+
+test('mouse actions compile to their own ops', async () => {
+    const ki = Kimetra();
+    const taken = capture(ki);
+    await ki.executeSequence([
+        ...(LINUX ? [] : [{ type: 'move', x: 10.4, y: -20 }]),
+        { type: 'moveby', x: 3, y: -4 },
+        { type: 'mousedown', button: 'right' },
+        { type: 'mouseup', button: 'right' },
+        { type: 'scroll', y: 2, x: -1 },
+        { type: 'scroll', y: -1 }
+    ]);
+
+    assert.deepStrictEqual(taken().records, [
+        ...(LINUX ? [] : [[OP_MOVE, 10, -20]]),
+        [OP_MOVE_BY, 3, -4],
+        [OP_BUTTON_DOWN, 1, 1],
+        [OP_BUTTON_UP, 1, 1],
+        [OP_SCROLL, 2, -1],
+        [OP_SCROLL, -1, 0]
+    ]);
+});
+
+test('click holds each press for duration and numbers the presses of a multi-click', async () => {
+    const ki = Kimetra();
+    const taken = capture(ki);
+
+    await ki.click();
+    assert.deepStrictEqual(taken().records, [
+        [OP_BUTTON_DOWN, 0, 1], [OP_SLEEP, 700, 0], [OP_BUTTON_UP, 0, 1]
+    ]);
+
+    await ki.click('back', 2);
+    assert.deepStrictEqual(taken().records, [
+        [OP_BUTTON_DOWN, 3, 1], [OP_SLEEP, 700, 0], [OP_BUTTON_UP, 3, 1],
+        [OP_SLEEP, 700, 0],
+        [OP_BUTTON_DOWN, 3, 2], [OP_SLEEP, 700, 0], [OP_BUTTON_UP, 3, 2]
+    ]);
+});
+
+test('a relative glide covers the exact distance in the exact time', async () => {
+    const ki = Kimetra({ unit: 'millisecond' });
+    const taken = capture(ki);
+    await ki.moveMouseBy(101, -37, 100);
+
+    const { records } = taken();
+    const moves = records.filter(r => r[0] === OP_MOVE_BY);
+    assert.strictEqual(moves.reduce((total, r) => total + r[1], 0), 101);
+    assert.strictEqual(moves.reduce((total, r) => total + r[2], 0), -37);
+    assert.strictEqual(sum(records, OP_SLEEP), 100000);
+    assert.strictEqual(moves.length, 25, 'a point every 4 ms');
+});
+
+test('an absolute glide starts at the pointer and ends exactly on the target', async () => {
+    if (LINUX) return;
+    const ki = Kimetra({ unit: 'millisecond' });
+    const taken = capture(ki);
+    ki.mousePosition = () => ({ x: 0, y: 0 });
+    await ki.moveMouse(400, 100, 40);
+
+    const { records } = taken();
+    const moves = records.filter(r => r[0] === OP_MOVE);
+    assert.strictEqual(moves.length, 10);
+    assert.deepStrictEqual(moves[0], [OP_MOVE, 40, 10]);
+    assert.deepStrictEqual(moves[9], [OP_MOVE, 400, 100]);
+    assert.strictEqual(sum(records, OP_SLEEP), 40000);
+});
+
+test('a glide inside a batch starts where the earlier moves leave the pointer', async () => {
+    if (LINUX) return;
+    const ki = Kimetra();
+    const taken = capture(ki);
+    let reads = 0;
+    ki.mousePosition = () => { reads++; return { x: 0, y: 0 }; };
+
+    // Known from the absolute move: no position read.
+    await ki.executeSequence([
+        { type: 'move', x: 100, y: 100 },
+        { type: 'moveby', x: 10, y: 0 },
+        { type: 'move', x: 210, y: 100, duration: 8000 }
+    ]);
+    assert.deepStrictEqual(taken().records.filter(r => r[0] === OP_MOVE).slice(1), [
+        [OP_MOVE, 160, 100], [OP_MOVE, 210, 100]
+    ]);
+    assert.strictEqual(reads, 0);
+
+    // Unknown: read once, then shifted by the relative move compiled before the glide.
+    await ki.executeSequence([
+        { type: 'moveby', x: 10, y: 0 },
+        { type: 'move', x: 110, y: 0, duration: 8000 }
+    ]);
+    assert.deepStrictEqual(taken().records.filter(r => r[0] === OP_MOVE), [
+        [OP_MOVE, 60, 0], [OP_MOVE, 110, 0]
+    ]);
+    assert.strictEqual(reads, 1);
+});
+
+test('Linux reports that absolute moves and position reads are not available yet', async () => {
+    const ki = Kimetra();
+    capture(ki);
+    if (LINUX) {
+        await assert.rejects(() => ki.moveMouse(1, 1), /not available on Linux yet/);
+        assert.throws(() => ki.mousePosition(), /not available on Linux yet/);
+    } else {
+        await ki.moveMouse(1, 1);
+    }
+});
+
+test('mouse arguments are validated', async () => {
+    const ki = Kimetra();
+    await assert.rejects(() => ki.click('side'), /Unknown mouse button "side"/);
+    await assert.rejects(() => ki.mouseDown('constructor'), /Unknown mouse button/);
+    await assert.rejects(() => ki.click('left', 1.5), /click needs a whole number of times/);
+    await assert.rejects(() => ki.moveMouseBy(NaN, 0), /x must be a finite number/);
+    await assert.rejects(() => ki.moveMouseBy(0, '5'), /y must be a finite number/);
+    await assert.rejects(() => ki.moveMouseBy(1, 1, -5), /duration must be a non-negative number/);
+    await assert.rejects(() => ki.scroll(), /y must be a finite number, received undefined/);
+});
+
 // Macros
+
+test('Kimacro has every action method and records what Kimetra would run', async () => {
+    const calls = {
+        keyDown: ['shift', 1], keyUp: ['shift', 2], pressKey: ['a', 3, 4],
+        pressKeys: [['a', 'b'], 5, 6], pressHotkey: [['ctrl', 'a'], 7, 8],
+        repeatKey: ['a', 2, 9, 10], typeText: ['hi', 11], moveMouse: [1, 2, 3, 4],
+        moveMouseBy: [5, 6, 7, 8], click: ['right', 2, 9], mouseDown: ['middle', 10],
+        mouseUp: ['middle', 11], scroll: [-3, 1, 12]
+    };
+    const ki = Kimetra();
+    let ran = null;
+    ki.executeSequence = async actions => { ran = actions[0]; return true; };
+
+    for (const [method, args] of Object.entries(calls)) {
+        await ki[method](...args);
+        assert.deepStrictEqual(Kimacro()[method](...args).toJSON(), [ran], method);
+    }
+});
 
 test('a macro is replayable and survives exec', async () => {
     const macro = Kimacro().pressKey('enter').typeText('hi').wait(1000);
@@ -370,9 +523,10 @@ test('fromJSON rejects anything that is not an array', () => {
 
 // Native surface
 
-test('the addon exposes the full core surface', () => {
+test('the addon matches this version and exposes the full core surface', () => {
     const ki = Kimetra();
-    for (const name of ['KeyDown', 'KeyUp', 'SendString', 'Sleep', 'Run', 'Cleanup']) {
+    assert.strictEqual(ki.core.Format, 3, 'src/bin holds a binary built for older JS; rebuild or sync it');
+    for (const name of ['KeyDown', 'KeyUp', 'SendString', 'Sleep', 'Run', 'MousePosition', 'Cleanup']) {
         assert.strictEqual(typeof ki.core[name], 'function', `core.${name} is missing`);
     }
 });
@@ -448,9 +602,30 @@ function cli(args) {
 
 test('no command word is also a key name', () => {
     // `keys` reads until the next command word, so no command may be a key name.
-    for (const word of ['key', 'keys', 'hotkey', 'repeat', 'type', 'wait', 'run', 'list']) {
+    const words = [
+        'key', 'keys', 'hotkey', 'repeat', 'type',
+        'move', 'moveby', 'click', 'mousedown', 'mouseup', 'scroll',
+        'wait', 'run', 'list'
+    ];
+    for (const word of words) {
         assert.strictEqual(Key[word], undefined, `"${word}" is both a command and a key name`);
     }
+});
+
+test('mouse commands compile to mouse actions, scaling only times', () => {
+    const { code, out } = cli([
+        '--dry-run', 'mousedown', 'move', '600', '400', '300', 'mouseup',
+        'click', 'right', '2', 'scroll', '-3', '1', 'moveby', '5', '-5'
+    ]);
+    assert.strictEqual(code, 0);
+    assert.deepStrictEqual(JSON.parse(out), [
+        { type: 'mousedown' },
+        { type: 'move', x: 600, y: 400, duration: 300000 },
+        { type: 'mouseup' },
+        { type: 'click', button: 'right', count: 2 },
+        { type: 'scroll', y: -3, x: 1 },
+        { type: 'moveby', x: 5, y: -5 }
+    ]);
 });
 
 test('a chain compiles into one action list', () => {
@@ -478,7 +653,10 @@ test('CLI numbers reach the action list as microseconds', () => {
 });
 
 test('what the CLI emits is what the library accepts', async () => {
-    const { out } = cli(['--dry-run', 'keys', 'a', 'b', 'wait', '5', 'repeat', 'down', '3']);
+    const { out } = cli([
+        '--dry-run', 'keys', 'a', 'b', 'wait', '5', 'repeat', 'down', '3',
+        'click', 'middle', 'moveby', '2', '-2', '10', 'scroll', '1'
+    ]);
     const ki = Kimetra();
     const taken = capture(ki);
 
