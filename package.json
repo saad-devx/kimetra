@@ -1,6 +1,6 @@
 {
     "name": "kimetra",
-    "version": "2.1.1",
+    "version": "2.2.0",
     "description": "Keyboard and mouse automation for Node.js on Windows, macOS and Linux (X11 and Wayland). Prebuilt, zero dependencies.",
     "main": "./src/kimetra.js",
     "types": "./index.d.ts",
