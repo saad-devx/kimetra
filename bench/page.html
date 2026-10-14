@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kimetra benchmark</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0e0e11;
+    --surface: #16161b;
+    --fg: #e6e6eb;
+    --muted: #8b8b98;
+    --line: #2c2c35;
+    --accent: #7c3aed;
+    --accent-hover: #6d28d9;
+    --accent-text: #a78bfa;
+    --orange: #f97316;
+    --ok: #22c55e;
+    --mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body { background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, -apple-system, 'Segoe UI', sans-serif; user-select: none; }
+  #stage { position: fixed; inset: 0; }
+  #status { position: fixed; top: 24px; left: 28px; right: 28px; font: 14px/1.4 var(--mono); color: #c4c4cf;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+  #status::before { content: '> '; color: var(--accent-text); }
+  .centre { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+  .at { position: absolute; transform: translate(-50%, -50%); }
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+  button { font: inherit; font-weight: 600; border: 0; border-radius: 6px; background: var(--accent); color: #fff; cursor: pointer; }
+  button:hover { background: var(--accent-hover); }
+  .note { width: min(440px, calc(100vw - 32px)); padding: 26px 28px; }
+  .note h1 { margin: 0 0 8px; font: 600 18px/1.3 var(--mono); }
+  .note h1 span { color: var(--accent-text); }
+  .note p, .note li { margin: 0; color: var(--muted); }
+  .note ol { margin: 14px 0 22px; padding-left: 20px; }
+  .note li + li { margin-top: 6px; }
+  .note b { color: var(--fg); font-weight: 600; }
+  .note .hint { margin-top: 12px; font: 12px var(--mono); text-align: center; }
+  #start { width: 100%; padding: 12px; font-size: 15px; }
+  .count { text-align: center; }
+  .count .number { font: 700 96px/1 var(--mono); color: var(--accent-text); }
+  .count .hint { margin-top: 14px; color: var(--muted); }
+  .area { width: 520px; height: 220px; display: grid; place-content: center; justify-items: center; gap: 10px;
+    border: 1px dashed var(--line); border-radius: 10px; color: var(--muted); outline: none; }
+  .area:focus { border-color: var(--accent-text); }
+  .area .live { color: var(--fg); font: 600 22px var(--mono); }
+  kbd { min-width: 44px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 6px;
+    font: 600 14px/1.4 var(--mono); color: var(--fg); text-align: center; }
+  kbd:empty { visibility: hidden; }
+  input, textarea { font: inherit; padding: 9px 12px; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--bg); color: inherit; user-select: text; outline: none; }
+  input:focus, textarea:focus { border-color: var(--accent-text); }
+  #text { width: 640px; height: 160px; resize: none; }
+  form { display: grid; grid-template-columns: 90px 360px; gap: 14px 12px; align-items: center; padding: 26px 28px; }
+  form label { color: var(--muted); }
+  form textarea { height: 72px; resize: none; }
+  form button { grid-column: 2; justify-self: start; padding: 10px 28px; }
+  .target { width: 64px; height: 64px; display: grid; place-items: center; border-radius: 50%; background: var(--accent);
+    color: #fff; font: 700 20px var(--mono); }
+  .target.hit { background: var(--ok); color: #0e0e11; }
+  .target[data-hint]::after { content: attr(data-hint); position: absolute; top: 72px; left: 50%; transform: translateX(-50%);
+    color: var(--muted); font: 12px var(--mono); white-space: nowrap; }
+  #card { width: 110px; height: 70px; display: grid; place-items: center; border-radius: 6px; background: var(--orange);
+    color: #1c1917; font-weight: 600; touch-action: none; }
+  #zone { width: 190px; height: 130px; display: grid; place-items: center; border: 1px dashed var(--ok); border-radius: 8px; color: var(--muted); }
+  #zone.hit { border-style: solid; color: var(--fg); }
+  #list { width: 220px; height: 200px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+  #list div { padding: 6px 12px; border-bottom: 1px solid var(--line); }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="status">Connecting...</div>
+<script>
+'use strict';
+
+const stage = document.getElementById('stage');
+const status = document.getElementById('status');
+const page = {
+  log: [], recording: false, blockKeys: false, last: null, offset: null, collect: () => ({}),
+  live: null, fullScreen: false, changedAt: 0, finished: false
+};
+
+const say = text => { status.textContent = text; };
+const byId = id => document.getElementById(id);
+
+function record(entry) {
+  if (page.recording) page.log.push(entry);
+}
+
+function track(e) {
+  page.last = { x: e.screenX, y: e.screenY };
+  page.offset = { x: e.screenX - e.clientX, y: e.screenY - e.clientY };
+}
+
+// The viewport's top-left corner on screen, in CSS pixels. In full screen that is the
+// window's own position; otherwise it comes from the last pointer event.
+function origin() {
+  if (document.fullscreenElement) return { x: screenX, y: screenY };
+  return page.offset || { x: screenX, y: screenY };
+}
+
+/** A point of the viewport in screen coordinates, in CSS pixels. */
+function onScreen(x, y) {
+  const o = origin();
+  return { x: Math.round(x + o.x), y: Math.round(y + o.y) };
+}
+
+function centre(el) {
+  const r = el.getBoundingClientRect();
+  return onScreen(r.left + r.width / 2, r.top + r.height / 2);
+}
+
+// Live feedback is drawn at most once per frame. Event timestamps are taken by the
+// browser when each event is created, so drawing does not change them.
+let drawing = false;
+function redraw() {
+  if (drawing || !page.live) return;
+  drawing = true;
+  requestAnimationFrame(() => {
+    drawing = false;
+    if (page.live) page.live();
+  });
+}
+
+addEventListener('keydown', e => {
+  if (page.blockKeys) e.preventDefault();
+  if (!e.repeat) record({ t: e.timeStamp, type: 'keydown', key: e.key, code: e.code });
+  redraw();
+}, true);
+
+addEventListener('keyup', e => {
+  if (page.blockKeys) e.preventDefault();
+  record({ t: e.timeStamp, type: 'keyup', key: e.key, code: e.code });
+}, true);
+
+addEventListener('input', e => record({ t: e.timeStamp, type: 'input', data: e.data, kind: e.inputType }), true);
+
+addEventListener('pointermove', e => {
+  track(e);
+  if (!page.recording) return;
+  const all = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
+  for (const c of all.length ? all : [e]) page.log.push({ t: c.timeStamp, type: 'move', x: c.screenX, y: c.screenY });
+}, true);
+
+addEventListener('pointerdown', e => {
+  track(e);
+  record({ t: e.timeStamp, type: 'pointerdown', button: e.button, target: e.target.id });
+}, true);
+
+addEventListener('pointerup', e => record({ t: e.timeStamp, type: 'pointerup', button: e.button, target: e.target.id }), true);
+
+addEventListener('wheel', e => record({ t: e.timeStamp, type: 'wheel', dy: Math.sign(e.deltaY) }), { capture: true, passive: true });
+
+addEventListener('contextmenu', e => e.preventDefault(), true);
+
+addEventListener('resize', () => { page.changedAt = performance.now(); });
+document.addEventListener('fullscreenchange', () => { page.changedAt = performance.now(); });
+
+// While the benchmark waits for the page, a click puts it back in full screen.
+addEventListener('click', () => {
+  if (page.fullScreen && !page.recording && !page.finished && !document.fullscreenElement) enterFullScreen();
+}, true);
+
+/** Asks for full screen. Pages cannot maximise their window; this is the closest they get. */
+async function enterFullScreen() {
+  try {
+    await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function leaveFullScreen() {
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+}
+
+// Counts down while the pointer stays still. Any movement starts it again, so the
+// benchmark never begins while a hand is still on the mouse.
+function countdown(seconds, hint) {
+  stage.innerHTML = '<div class="count centre"><div class="number" id="count"></div><div class="hint" id="hint"></div></div>';
+  byId('hint').textContent = hint;
+
+  return new Promise(done => {
+    let anchor = page.last;
+    let end = performance.now() + seconds * 1000;
+    const tick = () => {
+      const p = page.last;
+      if (p && anchor && Math.hypot(p.x - anchor.x, p.y - anchor.y) > 3) {
+        end = performance.now() + seconds * 1000;
+        byId('hint').textContent = 'The pointer moved. Keep the mouse still.';
+      }
+      anchor = p;
+      const left = Math.ceil((end - performance.now()) / 1000);
+      if (left <= 0) return done();
+      byId('count').textContent = left;
+      setTimeout(tick, 100);
+    };
+    tick();
+  });
+}
+
+const TEXT_ATTRS = 'spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"';
+
+// Clicks each kind of target should receive, to show it as hit.
+const WANT = {
+  left: { click: 1, double: 0, right: 0 },
+  double: { click: 2, double: 1, right: 0 },
+  right: { click: 0, double: 0, right: 1 }
+};
+const HINTS = { double: 'double click', right: 'right click' };
+
+/** One UI per scenario. Each returns the screen centres the benchmark needs to aim at. */
+const scenes = {
+  keys() {
+    stage.innerHTML =
+      '<div id="area" class="area centre" tabindex="0"><div>Key events arrive here</div>' +
+      '<div class="live"><span id="key-count">0</span> received</div><kbd id="key-last"></kbd></div>';
+    byId('area').focus();
+    page.blockKeys = true;
+
+    const count = byId('key-count');
+    const last = byId('key-last');
+    page.live = () => {
+      const downs = page.log.filter(e => e.type === 'keydown');
+      count.textContent = downs.length;
+      if (downs.length) {
+        const k = downs[downs.length - 1].key;
+        last.textContent = k === ' ' ? 'Space' : k.length === 1 ? k.toUpperCase() : k;
+      }
+    };
+    return {};
+  },
+
+  typing() {
+    stage.innerHTML = `<textarea id="text" class="centre" ${TEXT_ATTRS}></textarea>`;
+    byId('text').focus();
+    page.collect = () => ({ text: byId('text').value });
+    return {};
+  },
+
+  form() {
+    const fields = [['name', 'Name'], ['email', 'Email'], ['phone', 'Phone'], ['city', 'City']];
+    stage.innerHTML =
+      '<form id="form" class="panel centre" autocomplete="off">' +
+      fields.map(([id, label]) => `<label for="f-${id}">${label}</label><input id="f-${id}" type="text" ${TEXT_ATTRS}>`).join('') +
+      `<label for="f-notes">Notes</label><textarea id="f-notes" ${TEXT_ATTRS}></textarea>` +
+      '<button id="f-submit" type="submit">Submit</button></form>';
+
+    const state = { submitted: false };
+    byId('form').addEventListener('submit', e => { e.preventDefault(); state.submitted = true; });
+    byId('f-name').focus();
+
+    const ids = ['name', 'email', 'phone', 'city', 'notes'];
+    page.collect = () => {
+      const values = {};
+      for (const id of ids) values[id] = byId(`f-${id}`).value;
+      return { values, submitted: state.submitted };
+    };
+
+    const targets = {};
+    for (const id of [...ids, 'submit']) targets[id] = centre(byId(`f-${id}`));
+    return targets;
+  },
+
+  mouse(layout) {
+    const place = (html, spot) =>
+      `${html.replace('>', ` style="left: calc(50% + ${spot.dx}px); top: calc(50% + ${spot.dy}px)">`)}`;
+
+    let html = '';
+    for (const t of layout.targets) {
+      const hint = HINTS[t.kind] ? ` data-hint="${HINTS[t.kind]}"` : '';
+      html += place(`<div id="${t.id}" class="target at"${hint}>${t.label}</div>`, t);
+    }
+    html += place('<div id="zone" class="at">Drop here</div>', layout.zone);
+    html += place('<div id="card" class="at">Drag me</div>', layout.card);
+    html += place('<div id="list" class="at"></div>', layout.list);
+    stage.innerHTML = html;
+
+    const list = byId('list');
+    for (let i = 1; i <= 60; i++) list.insertAdjacentHTML('beforeend', `<div>Row ${i}</div>`);
+
+    const tally = {};
+    for (const t of layout.targets) {
+      const el = byId(t.id);
+      const want = WANT[t.kind];
+      const got = tally[t.id] = { click: 0, double: 0, right: 0 };
+      const count = field => {
+        got[field]++;
+        el.classList.toggle('hit', !!want && got.click === want.click && got.double === want.double && got.right === want.right);
+      };
+      el.addEventListener('click', () => count('click'));
+      el.addEventListener('dblclick', () => count('double'));
+      el.addEventListener('auxclick', e => { if (e.button === 2) count('right'); });
+    }
+
+    const card = byId('card');
+    const zone = byId('zone');
+    const state = { dropped: false };
+    let grab = null;
+    card.addEventListener('pointerdown', e => {
+      if (e.button !== 0) return;
+      const c = card.getBoundingClientRect();
+      grab = { x: e.clientX - (c.left + c.width / 2), y: e.clientY - (c.top + c.height / 2) };
+      card.setPointerCapture(e.pointerId);
+    });
+    card.addEventListener('pointermove', e => {
+      if (!grab) return;
+      card.style.left = `${e.clientX - grab.x}px`;
+      card.style.top = `${e.clientY - grab.y}px`;
+    });
+    card.addEventListener('pointerup', () => {
+      if (!grab) return;
+      grab = null;
+      const c = card.getBoundingClientRect();
+      const z = zone.getBoundingClientRect();
+      const x = c.left + c.width / 2;
+      const y = c.top + c.height / 2;
+      state.dropped = x > z.left && x < z.right && y > z.top && y < z.bottom;
+      zone.classList.toggle('hit', state.dropped);
+    });
+
+    page.collect = () => ({ tally, dropped: state.dropped, scrollTop: list.scrollTop });
+
+    const targets = {};
+    for (const t of layout.targets) targets[t.id] = centre(byId(t.id));
+    targets.card = centre(card);
+    targets.zone = centre(zone);
+    targets.list = centre(list);
+    return targets;
+  }
+};
+
+const commands = {
+  start({ minutes }) {
+    stage.innerHTML =
+      '<div class="note panel centre"><h1><span>Kimetra</span> benchmark</h1>' +
+      '<p>Each library sends real keystrokes, clicks and scrolls to this page, which checks what arrives and when.</p>' +
+      '<ol><li>Click <b>Start</b>. The page switches to full screen.</li>' +
+      `<li>Take your hand off the mouse and keyboard until it finishes, in about <b>${minutes} min</b>.</li></ol>` +
+      '<button id="start">Start</button><p class="hint">Ctrl+C in the terminal stops the run.</p></div>';
+    say('Waiting for Start...');
+
+    return new Promise(done => {
+      byId('start').addEventListener('click', async () => {
+        stage.innerHTML = '';
+        page.fullScreen = await enterFullScreen();
+        say('Starting...');
+        await countdown(page.fullScreen ? 3 : 5, page.fullScreen
+          ? 'Hands off the mouse and keyboard.'
+          : 'Full screen is not available here. Maximise this window, then keep the mouse still.');
+        stage.innerHTML = '';
+        say('Running. Leave the keyboard and mouse alone.');
+        done(true);
+      }, { once: true });
+    });
+  },
+
+  status() {
+    const focused = document.hasFocus();
+    const paused = !focused || (page.fullScreen && !document.fullscreenElement);
+    if (paused && !page.recording) say('Paused. Click anywhere on this page to continue...');
+    return {
+      paused,
+      settling: performance.now() - page.changedAt < 600,
+      focused,
+      width: innerWidth,
+      height: innerHeight,
+      centre: onScreen(innerWidth / 2, innerHeight / 2),
+      pointer: page.last
+    };
+  },
+
+  pointer: () => page.last,
+
+  prepare({ scene, layout, label }) {
+    page.log = [];
+    page.blockKeys = false;
+    page.collect = () => ({});
+    page.live = null;
+    const targets = scenes[scene](layout || {});
+    targets.centre = onScreen(innerWidth / 2, innerHeight / 2);
+    say(label);
+    page.recording = true;
+    return { targets, focused: document.hasFocus() };
+  },
+
+  finish() {
+    page.recording = false;
+    page.live = null;
+    const result = { log: page.log, state: page.collect() };
+    stage.innerHTML = '';
+    return result;
+  },
+
+  done() {
+    page.finished = true;
+    stage.innerHTML = '<div class="note panel centre"><h1>Finished</h1><p>The results are in the terminal. You can close this tab.</p></div>';
+    say('Finished');
+    leaveFullScreen();
+    return true;
+  }
+};
+
+const source = new EventSource('/commands');
+source.onmessage = async message => {
+  const { id, cmd, args } = JSON.parse(message.data);
+  const data = await commands[cmd](args);
+  fetch('/reply', { method: 'POST', body: JSON.stringify({ id, data }) });
+};
+source.onerror = () => {
+  if (page.finished) return;
+  source.close();
+  page.recording = false;
+  stage.innerHTML = '';
+  say('The benchmark stopped. You can close this tab.');
+  leaveFullScreen();
+};
+
+say('Connected. Waiting for the benchmark...');
+fetch('/hello', {
+  method: 'POST',
+  body: JSON.stringify({
+    width: innerWidth,
+    height: innerHeight,
+    dpr: devicePixelRatio,
+    isolated: crossOriginIsolated,
+    agent: navigator.userAgent
+  })
+});
+</script>
+</body>
+</html>

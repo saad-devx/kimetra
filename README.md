@@ -14,8 +14,45 @@ through a precompiled native addon: `SendInput` on Windows, `CGEvent` on macOS,
 - **Works on Wayland.** `uinput` reaches every app on Linux, on both X11 and Wayland.
 - **One native call per sequence.** JavaScript never runs between input events.
 - **Microsecond timing.** Waits target an absolute deadline instead of drifting.
-- **No dependencies, no build step.** One binary per platform, under 150 KB installed.
+- **No dependencies, no build step.** One binary per platform, under 200 KB installed.
 - **The same key names everywhere.** `ctrl` is `ctrl` on all three platforms.
+
+## Benchmarks
+
+Every library sends real input to a browser page that records when each event arrives,
+and every run is checked for correctness. Windows 11, Node 22, medians of 3 runs. Lower
+is better everywhere. [Method, full results and how to reproduce](bench/README.md).
+
+| Timing error | | |
+| --- | --- | --- |
+| **Kimetra** | `█` | **0.9 ms** |
+| robotjs 0.9.1 | `██████████` | 11.0 ms |
+| nut.js 4.2.6 | `████████████████████████` | 25.5 ms |
+
+How far events landed from their planned time, median over typing, a game macro and a
+mouse workflow.
+
+| Overhead | | |
+| --- | --- | --- |
+| **Kimetra** | `██` | **0.35 s** |
+| robotjs 0.9.1 | `████████` | 1.66 s |
+| nut.js 4.2.6 | `████████████████████████` | 4.87 s |
+
+Time added on top of 15.6 s of scripted scenarios: typing, a form, a game macro and a
+mouse workflow.
+
+| Installed size | | |
+| --- | --- | --- |
+| **Kimetra** | `█` | **188 KB**, 1 package |
+| robotjs 0.9.1 | `███` | 2.6 MB, 3 packages |
+| nut.js 4.2.6 | `████████████████████████` | 28.6 MB, 125 packages |
+
+`node_modules` after `npm install` on Windows x64, dependencies included.
+
+The first two use Kimetra's sequences, where a whole script runs as one native call.
+Called one action at a time with `setTimeout` waits in between, Kimetra performs like
+robotjs, and raw key throughput is the same for both because that time is spent inside
+the OS.
 
 ## Install
 

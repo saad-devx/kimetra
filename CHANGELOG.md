@@ -13,8 +13,10 @@
   points on macOS. On Linux only relative moves are available for now.
 - `Kimacro` has every action method, including `keyDown` and `keyUp`.
 - `down` and `up` sequence actions, matching `keyDown` and `keyUp`.
-- `npm run bench`, with a script that runs the same editing session through
-  Kimetra, robotjs and nut.js. See `bench/README.md`.
+- `npm run bench`: realistic scenarios (typing, a form, a game macro, a mouse
+  workflow) run through Kimetra, robotjs and nut.js against a local browser page
+  that checks what arrived and when. `--report` writes the results as Markdown.
+  See `bench/README.md`.
 
 ### Fixed
 

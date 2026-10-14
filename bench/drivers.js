@@ -1,13 +1,16 @@
 'use strict';
 
-// The same operations, run through each library the way its users would write them.
-// Every library's own delays are set to zero; times are milliseconds.
+// Runs scenario steps (see scenarios.js) through each library, the way its users would
+// write them. Every library's own delays are set to zero. Pointer coordinates arrive in
+// the library's own units; bench.js converts them.
 
 const path = require('path');
-const { planned } = require('./script');
 
 const ROOT = path.resolve(__dirname, '..');
-const OP_SLEEP = 2; // see src/cpp/backend.h
+
+// One wheel notch in each library's scroll units: raw wheel data on Windows (120 per
+// notch), pixels on macOS, button clicks on Linux.
+const NOTCH = { win32: 120, darwin: 10, linux: 1 }[process.platform];
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -19,93 +22,47 @@ function optional(name) {
     }
 }
 
-/** Script steps as Kimetra actions. Glides are absolute where the pointer can be read. */
-function toActions(steps, start) {
-    let at = start ? { x: start.x, y: start.y } : null;
-
-    return steps.map(step => {
-        switch (step.do) {
-            case 'type': return { type: 'text', text: step.text };
-            case 'key': return { type: 'key', key: step.key };
-            case 'keys': return { type: 'keys', keys: step.keys };
-            case 'hotkey': return { type: 'hotkey', keys: step.keys };
-            case 'repeat': return { type: 'repeat', key: step.key, times: step.times };
-            case 'scroll': return { type: 'scroll', y: step.y };
-            case 'click': return { type: 'click' };
-            case 'wait': return { type: 'wait', duration: step.ms };
-            case 'glide':
-                if (!at) return { type: 'moveby', x: step.dx, y: step.dy, duration: step.ms };
-                at = { x: at.x + step.dx, y: at.y + step.dy };
-                return { type: 'move', x: at.x, y: at.y, duration: step.ms };
-            default:
-                throw new Error(`Unknown script step "${step.do}".`);
-        }
-    });
+/** A step as a Kimetra action. Times are milliseconds, so the instances use that unit. */
+function toAction(step) {
+    switch (step.do) {
+        case 'type': return { type: 'text', text: step.text };
+        case 'key': return { type: 'key', key: step.key };
+        case 'down':
+        case 'up': return { type: step.do, key: step.key };
+        case 'hotkey': return { type: 'hotkey', keys: step.keys };
+        case 'wait': return { type: 'wait', duration: step.ms };
+        case 'move': return { type: 'move', x: step.x, y: step.y, duration: step.ms };
+        case 'click': return { type: 'click', button: step.button, count: step.count };
+        case 'press': return { type: 'mousedown' };
+        case 'release': return { type: 'mouseup' };
+        case 'scroll': return { type: 'scroll', y: step.notches };
+        default: throw new Error(`Unknown step "${step.do}".`);
+    }
 }
 
 /**
- * Kimetra, either as one sequence per job or as one call per step with JavaScript waits
- * in between. Counts the time its batches spend in deliberate holds and gaps. With
- * `holds` false, key and click holds are zero, like the other libraries; only the fixed
- * gap between the keys of a shortcut remains. That variant only runs the script.
+ * Kimetra as one sequence per run, or as one call per step with JavaScript waits in
+ * between, the way the other libraries are used. `raw` drops the default key holds for
+ * the synthetic key-tap test, since the other libraries hold keys for zero time.
  */
-function kimetra(mode, holds = true) {
+function kimetra(mode) {
     const { Kimetra } = require(ROOT);
-    const ki = Kimetra(holds
-        ? { unit: 'millisecond' }
-        : { unit: 'millisecond', duration: 0, interval: 0, hotkeyDelay: 0 });
+    const ki = Kimetra({ unit: 'millisecond' });
     const raw = Kimetra({ unit: 'millisecond', duration: 0, interval: 0 });
-
-    let waitedUs = 0;
-    const run = ki._run;
-    ki._run = function () {
-        for (let i = 0; i < this._len; i += 3) {
-            if (this._ops[i] === OP_SLEEP) waitedUs += this._ops[i + 1];
-        }
-        return run.call(this);
-    };
-
     const sequence = mode === 'sequence';
-    const name = !sequence ? 'kimetra, one call per step'
-        : holds ? 'kimetra, one sequence' : 'kimetra, one sequence, holds off';
 
     return {
-        name,
+        name: sequence ? 'kimetra, one sequence' : 'kimetra, one call per step',
+        position: () => ki.mousePosition(),
+        jump: (x, y) => ki.moveMouse(x, y),
 
-        keyTaps: !holds ? null : async count => {
-            if (sequence) return raw.repeatKey('f20', count);
-            for (let i = 0; i < count; i++) await raw.pressKey('f20');
-        },
-
-        pointerMoves: !holds ? null : async (count, start) => {
-            const moves = [];
-            for (let i = 0; i < count; i++) {
-                moves.push(start
-                    ? { type: 'move', x: start.x + (i % 2), y: start.y }
-                    : { type: 'moveby', x: i % 2 ? -1 : 1, y: 0 });
+        async run(steps, { synthetic } = {}) {
+            const target = synthetic ? raw : ki;
+            if (sequence) return target.executeSequence(steps.map(toAction));
+            for (const step of steps) {
+                if (step.do === 'wait') await sleep(step.ms);
+                else await target.executeSequence([toAction(step)]);
             }
-            if (sequence) return raw.executeSequence(moves);
-            for (const move of moves) await raw.executeSequence([move]);
-        },
-
-        type: sequence && holds ? text => ki.typeText(text) : null,
-
-        async script(steps, start) {
-            waitedUs = 0;
-            const actions = toActions(steps, start);
-            if (sequence) {
-                await ki.executeSequence(actions);
-            } else {
-                for (const action of actions) {
-                    if (action.type === 'wait') await sleep(action.duration);
-                    else await ki.executeSequence([action]);
-                }
-            }
-
-            // Native waits minus the script's own waits that ran natively are the holds
-            // and gaps Kimetra adds on purpose.
-            const native = sequence ? steps : steps.filter(step => step.do !== 'wait');
-            return { holdsMs: waitedUs / 1000 - planned(native) };
         }
     };
 }
@@ -119,54 +76,46 @@ function robotjs() {
     const NAMES = { ctrl: 'control', meta: 'command' };
     const key = name => NAMES[name] || name;
 
+    // robotjs has no timed glide. Every 4 ms (or whenever setTimeout fires) the pointer
+    // goes where the glide should be by then, so the glide takes its planned time.
+    async function glide({ x, y, ms }) {
+        if (!ms) return robot.moveMouse(x, y);
+        const from = robot.getMousePos();
+        const start = performance.now();
+        for (;;) {
+            const done = Math.min(1, (performance.now() - start) / ms);
+            robot.moveMouse(Math.round(from.x + (x - from.x) * done), Math.round(from.y + (y - from.y) * done));
+            if (done === 1) return;
+            await sleep(4);
+        }
+    }
+
     return {
         name: 'robotjs',
+        position: () => robot.getMousePos(),
+        jump: (x, y) => robot.moveMouse(x, y),
 
-        async keyTaps(count) {
-            for (let i = 0; i < count; i++) robot.keyTap('f20');
-        },
-
-        async pointerMoves(count, start) {
-            if (!start) return 'skipped';
-            for (let i = 0; i < count; i++) robot.moveMouse(start.x + (i % 2), start.y);
-        },
-
-        async type(text) {
-            robot.typeString(text);
-        },
-
-        async script(steps, start) {
-            let at = start ? { x: start.x, y: start.y } : robot.getMousePos();
+        async run(steps) {
             for (const step of steps) {
                 switch (step.do) {
                     case 'type': robot.typeString(step.text); break;
                     case 'key': robot.keyTap(key(step.key)); break;
-                    case 'keys': for (const k of step.keys) robot.keyTap(key(k)); break;
-                    case 'repeat': for (let i = 0; i < step.times; i++) robot.keyTap(key(step.key)); break;
+                    case 'down': robot.keyToggle(key(step.key), 'down'); break;
+                    case 'up': robot.keyToggle(key(step.key), 'up'); break;
                     case 'hotkey': {
                         const keys = step.keys.map(key);
                         robot.keyTap(keys[keys.length - 1], keys.slice(0, -1));
                         break;
                     }
-                    case 'scroll': robot.scrollMouse(0, -step.y); break;
-                    case 'click': robot.mouseClick(); break;
                     case 'wait': await sleep(step.ms); break;
-                    case 'glide': {
-                        // A point every 4 ms, paced with setTimeout, as a robotjs script would.
-                        const points = Math.max(1, Math.round(step.ms / 4));
-                        for (let i = 1; i <= points; i++) {
-                            robot.moveMouse(
-                                Math.round(at.x + (step.dx * i) / points),
-                                Math.round(at.y + (step.dy * i) / points)
-                            );
-                            await sleep(step.ms / points);
-                        }
-                        at = { x: at.x + step.dx, y: at.y + step.dy };
-                        break;
-                    }
+                    case 'move': await glide(step); break;
+                    case 'click': robot.mouseClick(step.button, step.count === 2); break;
+                    case 'press': robot.mouseToggle('down', 'left'); break;
+                    case 'release': robot.mouseToggle('up', 'left'); break;
+                    case 'scroll': robot.scrollMouse(0, -step.notches * NOTCH); break;
+                    default: throw new Error(`Unknown step "${step.do}".`);
                 }
             }
-            return {};
         }
     };
 }
@@ -175,76 +124,75 @@ function nutjs() {
     const nut = optional('@nut-tree-fork/nut-js') || optional('@nut-tree/nut-js');
     if (!nut) return null;
 
-    const { keyboard, mouse, Key, Point, straightTo } = nut;
+    const { keyboard, mouse, Key, Button, Point, straightTo } = nut;
     keyboard.config.autoDelayMs = 0;
     mouse.config.autoDelayMs = 0;
 
     const KEYS = {
-        enter: Key.Enter, backspace: Key.Backspace, up: Key.Up, down: Key.Down,
-        left: Key.Left, right: Key.Right, home: Key.Home, end: Key.End, f20: Key.F20,
+        f20: Key.F20, tab: Key.Tab, enter: Key.Enter, backspace: Key.Backspace, space: Key.Space,
         shift: Key.LeftShift, ctrl: Key.LeftControl,
         meta: process.platform === 'darwin' ? Key.LeftCmd : Key.LeftSuper,
-        a: Key.A, z: Key.Z
+        w: Key.W, a: Key.A, d: Key.D
     };
-    const tap = async name => {
-        await keyboard.pressKey(KEYS[name]);
-        await keyboard.releaseKey(KEYS[name]);
+    const key = name => {
+        if (KEYS[name] === undefined) throw new Error(`No nut.js key for "${name}".`);
+        return KEYS[name];
     };
+
+    // nut.js paces a path by speed, so pick the speed that takes step.ms.
+    async function glide({ x, y, ms }) {
+        const from = await mouse.getPosition();
+        const distance = Math.hypot(x - from.x, y - from.y);
+        if (!ms || !distance) return mouse.setPosition(new Point(x, y));
+        mouse.config.mouseSpeed = distance / (ms / 1000);
+        await mouse.move(straightTo(new Point(x, y)));
+    }
 
     return {
         name: 'nut.js',
+        position: () => mouse.getPosition(),
+        jump: (x, y) => mouse.setPosition(new Point(x, y)),
 
-        async keyTaps(count) {
-            for (let i = 0; i < count; i++) await tap('f20');
-        },
-
-        async pointerMoves(count, start) {
-            if (!start) return 'skipped';
-            for (let i = 0; i < count; i++) await mouse.setPosition(new Point(start.x + (i % 2), start.y));
-        },
-
-        async type(text) {
-            await keyboard.type(text);
-        },
-
-        async script(steps, start) {
-            let at = start ? { x: start.x, y: start.y } : await mouse.getPosition();
+        async run(steps) {
             for (const step of steps) {
                 switch (step.do) {
                     case 'type': await keyboard.type(step.text); break;
-                    case 'key': await tap(step.key); break;
-                    case 'keys': for (const k of step.keys) await tap(k); break;
-                    case 'repeat': for (let i = 0; i < step.times; i++) await tap(step.key); break;
+                    case 'key':
+                        await keyboard.pressKey(key(step.key));
+                        await keyboard.releaseKey(key(step.key));
+                        break;
+                    case 'down': await keyboard.pressKey(key(step.key)); break;
+                    case 'up': await keyboard.releaseKey(key(step.key)); break;
                     case 'hotkey': {
-                        const keys = step.keys.map(k => KEYS[k]);
+                        const keys = step.keys.map(key);
                         await keyboard.pressKey(...keys);
                         await keyboard.releaseKey(...keys);
                         break;
                     }
-                    case 'scroll':
-                        if (step.y > 0) await mouse.scrollDown(step.y);
-                        else await mouse.scrollUp(-step.y);
-                        break;
-                    case 'click': await mouse.leftClick(); break;
                     case 'wait': await sleep(step.ms); break;
-                    case 'glide': {
-                        // nut.js paces a path by speed, so pick the speed that takes step.ms.
-                        at = { x: at.x + step.dx, y: at.y + step.dy };
-                        mouse.config.mouseSpeed = Math.hypot(step.dx, step.dy) / (step.ms / 1000);
-                        await mouse.move(straightTo(new Point(at.x, at.y)));
+                    case 'move': await glide(step); break;
+                    case 'click': {
+                        const button = step.button === 'right' ? Button.RIGHT : Button.LEFT;
+                        if (step.count === 2) await mouse.doubleClick(button);
+                        else await mouse.click(button);
                         break;
                     }
+                    case 'press': await mouse.pressButton(Button.LEFT); break;
+                    case 'release': await mouse.releaseButton(Button.LEFT); break;
+                    case 'scroll':
+                        if (step.notches > 0) await mouse.scrollDown(step.notches * NOTCH);
+                        else await mouse.scrollUp(-step.notches * NOTCH);
+                        break;
+                    default: throw new Error(`Unknown step "${step.do}".`);
                 }
             }
-            return {};
         }
     };
 }
 
-/** Kimetra in each mode, then every other library that is installed. */
+/** Kimetra in both modes, then every other library that is installed. */
 function load() {
-    return [kimetra('sequence'), kimetra('sequence', false), kimetra('calls'), robotjs(), nutjs()]
-        .filter(Boolean);
+    return [kimetra('sequence'), kimetra('calls'), robotjs(), nutjs()].filter(Boolean);
 }
 
-module.exports = { load, toActions };
+module.exports = { load, toAction };
